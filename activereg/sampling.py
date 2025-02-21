@@ -8,7 +8,7 @@ from sklearn.metrics import pairwise_distances_argmin_min
 from typing import Union, List, Tuple
 
 
-def sample_landscape(X_landscape: np.ndarray, n_points: int, mode='fps') -> np.ndarray:
+def sample_landscape(X_landscape: np.ndarray, n_points: int, mode: str='fps', **kwargs) -> np.ndarray:
     """
     Always returns an index from the X_landscape array
     """
@@ -19,7 +19,7 @@ def sample_landscape(X_landscape: np.ndarray, n_points: int, mode='fps') -> np.n
         'random' : rnd
     }
 
-    return sampling_mode[mode](X_landscape,n_points)
+    return sampling_mode[mode](X=X_landscape, n_points=n_points, **kwargs)
 
 
 def rnd(X: np.ndarray, n_points: int) -> np.ndarray:

@@ -9,7 +9,7 @@ from activereg.acquisition import landscape_acquisition, highest_landscape_selec
 from activereg.beauty import get_axes
 
 # Test experiment setup
-OUTDIR = './test1'
+OUTDIR = './test1/'
 X_pool = np.load('./data/point_space_2d_scaled.npy')
 y_pool = np.load('./data/proptest2d_2.npy')
 
@@ -19,7 +19,7 @@ gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10)
 
 # - func
 
-def plot_cycles(train_set, next_set, pool_set, pred_set, landscape_set):
+def plot_cycles(train_set, next_set, pool_set, pred_set, landscape_set, name_set, show=False):
     fig, ax = get_axes(3,3)
 
     X,y,cmap = pool_set
@@ -41,13 +41,17 @@ def plot_cycles(train_set, next_set, pool_set, pred_set, landscape_set):
     ax[2].scatter(*Xt.T,c=yt,s=30,cmap=cmap,vmin=min(y),vmax=max(y),marker='o',edgecolor='black',zorder=3)
 
     fig.tight_layout()
-    plt.show()
+    fig_name_list = [str(i) for i in name_set]
+    fig_name = "_".join(fig_name_list)
+    fig.savefig(fig_name+'.png')
+    if show:
+        plt.show()
 
 # - main
 
 def main(n_batch: int=4, 
          init_sampling_mode: str='fps',
-         n_cycles: int=5,
+         n_cycles: int=8,
          acquisition_mode: str='explore_uncertainty',
          sampling_mode: str='voronoi'):
 
@@ -88,7 +92,8 @@ def main(n_batch: int=4,
                     pred_set=(X_candidates,y_pred),
                     pool_set=(X_pool,y_pool,'coolwarm'),
                     next_set=(X_next,y_next),
-                    landscape_set=(landscape,X_acq_landscape,'plasma'))
+                    landscape_set=(landscape,X_acq_landscape,'plasma'),
+                    name_set=(OUTDIR,'fig',init_sampling_mode,acquisition_mode,sampling_mode,c))
 
         # 5. update the trainig set
         X_train = np.vstack((X_train, X_next))

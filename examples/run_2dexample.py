@@ -9,7 +9,7 @@ from activereg.acquisition import landscape_acquisition, highest_landscape_selec
 from activereg.beauty import get_axes
 
 # Test experiment setup
-OUTDIR = './test1/'
+OUTDIR = './test2/'
 X_pool = np.load('./data/point_space_2d_scaled.npy')
 y_pool = np.load('./data/proptest2d_2.npy')
 
@@ -42,7 +42,7 @@ def plot_cycles(train_set, next_set, pool_set, pred_set, landscape_set, name_set
 
     fig.tight_layout()
     fig_name_list = [str(i) for i in name_set]
-    fig_name = "_".join(fig_name_list)
+    fig_name = fig_name_list[0]+"_".join(fig_name_list[1:])
     fig.savefig(fig_name+'.png')
     if show:
         plt.show()
@@ -52,7 +52,7 @@ def plot_cycles(train_set, next_set, pool_set, pred_set, landscape_set, name_set
 def main(n_batch: int=4, 
          init_sampling_mode: str='fps',
          n_cycles: int=8,
-         acquisition_mode: str='explore_uncertainty',
+         acquisition_mode: str='exploit_ucb',
          sampling_mode: str='voronoi'):
 
     # 1. init experiment

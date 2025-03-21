@@ -1,0 +1,15 @@
+out_dir = 'test_explore_uncertainty_nb4_nc8_prc80'
+overwrite = true
+
+X_pool = 'point_space_2d_scaled.npy'
+y_pool = 'proptest2d_2.npy'
+
+ml_model = 'test_matern'
+
+[experiment]
+n_batch = 4
+init_sampling_mode = [1292, 6480, 0, 6546]
+n_cycles = 10
+acquisition_mode = 'explore_uncertainty'
+percentile = 80
+sampling_mode = 'voronoi'

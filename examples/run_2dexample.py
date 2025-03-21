@@ -9,7 +9,7 @@ from activereg.acquisition import landscape_acquisition, highest_landscape_selec
 from activereg.beauty import get_axes
 
 # Test experiment setup
-OUTDIR = './test2/'
+OUTDIR = './test1/'
 X_pool = np.load('./data/point_space_2d_scaled.npy')
 y_pool = np.load('./data/proptest2d_2.npy')
 
@@ -52,7 +52,7 @@ def plot_cycles(train_set, next_set, pool_set, pred_set, landscape_set, name_set
 def main(n_batch: int=4, 
          init_sampling_mode: str='fps',
          n_cycles: int=8,
-         acquisition_mode: str='exploit_ucb',
+         acquisition_mode: str='explore_uncertainty',
          sampling_mode: str='voronoi'):
 
     # 1. init experiment
@@ -82,7 +82,9 @@ def main(n_batch: int=4,
         X_acq_landscape = X_candidates[acq_landscape_ndx]
         
         # 4. sample new points in from the landscape
-        sampled_hls_idx = sample_landscape(X_landscape=X_acq_landscape, n_points=n_batch, mode=sampling_mode)
+        sampled_hls_idx = sample_landscape(X_landscape=X_acq_landscape, 
+                                           n_points=n_batch, 
+                                           sampling_mode=sampling_mode)
         sampled_new_idx = acq_landscape_ndx[sampled_hls_idx]
 
         X_next, y_next = X_candidates[sampled_new_idx], y_candidates[sampled_new_idx]

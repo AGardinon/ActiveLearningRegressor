@@ -15,7 +15,7 @@ def highest_landscape_selection(landscape: np.ndarray, percentile: int=80):
 def landscape_acquisition(X_candidates: np.ndarray, gp_model, acquisition_mode: str, **kwargs):
 
     modes = {
-        'exploit_ucb' : exploit_ucb,
+        'upper_confidence_bound' : upper_confidence_bound,
         'explore_uncertainty' : explore_uncertainty
     }
 
@@ -25,7 +25,7 @@ def landscape_acquisition(X_candidates: np.ndarray, gp_model, acquisition_mode: 
     return modes[acquisition_mode](X_candidates, gp_model, **kwargs)
 
 
-def exploit_ucb(X_candidates: np.ndarray, gp_model, kappa: float=2.0) -> Tuple[np.ndarray]:
+def upper_confidence_bound(X_candidates: np.ndarray, gp_model, kappa: float=2.0) -> Tuple[np.ndarray]:
     """
     Acquisition function: Upper Confidence Bound (UCB)
     """

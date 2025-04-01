@@ -1,5 +1,5 @@
 data:
-  out_dir: 'test_models'
+  out_dir: 'test_2D_synthetic'
   overwrite: true
   X_pool: 'point_space_2d_scaled.npy'
   y_pool: 'proptest2d_2.npy'
@@ -16,11 +16,19 @@ ml:
 experiment:
   n_batch: 4
   n_cycles: 10
-  acquisition_mode: 'upper_confidence_bound'
-  percentile: 80
-  sampling_mode: 'fps'
+  acquisition_parameters:
+    acquisition_mode: 'expected_improvement'
+    # kappa:
+    # xi: 
+  percentile: 90
+  sampling_mode: 'voronoi'
   init_sampling_mode:
   - 1292
   - 6480
   - 0
   - 6546
+  # init_sampling_mode:
+  # - 5186
+  # - 267
+  # - 451
+  # - 1867

@@ -1,4 +1,4 @@
-out_dir = 'test_explore_uncertainty_nb4_nc8_prc80'
+out_dir = 'test_upper_confidence_bound_nb4_nc8_prc80_fps'
 overwrite = true
 
 X_pool = 'point_space_2d_scaled.npy'
@@ -10,6 +10,6 @@ ml_model = 'test_matern'
 n_batch = 4
 init_sampling_mode = [1292, 6480, 0, 6546]
 n_cycles = 10
-acquisition_mode = 'explore_uncertainty'
+acquisition_mode = 'upper_confidence_bound'
 percentile = 80
-sampling_mode = 'voronoi'
+sampling_mode = 'fps'

@@ -1,0 +1,26 @@
+data:
+  out_dir: 'test_models'
+  overwrite: true
+  X_pool: 'point_space_2d_scaled.npy'
+  y_pool: 'proptest2d_2.npy'
+
+ml:
+  ml_model: 'GPR'
+  ml_model_param:
+    n_restarts_optimizer: 10
+  kernel_recipe:
+    type: "Matern"
+    length_scale: 1.0
+    nu: 2.5
+
+experiment:
+  n_batch: 4
+  n_cycles: 10
+  acquisition_mode: 'upper_confidence_bound'
+  percentile: 80
+  sampling_mode: 'fps'
+  init_sampling_mode:
+  - 1292
+  - 6480
+  - 0
+  - 6546

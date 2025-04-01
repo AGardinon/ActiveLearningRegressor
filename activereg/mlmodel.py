@@ -15,7 +15,7 @@ class GPR:
         self.model = GaussianProcessRegressor(**kwargs)
         self.log_transform = log_transform
 
-    def train(self, x: np.ndarray, y: np.ndarray, **kwargs) -> None:
+    def train(self, x: np.ndarray, y: np.ndarray) -> None:
         if self.log_transform:
             y = np.log10(y)
         self.model.fit(x, y)
@@ -95,8 +95,3 @@ class KernelFactory:
         else:
             raise ValueError(f"Invalid kernel definition: {kernel_recipe}")
         
-# - ML MODELS
-
-# ML_MODELS = {
-#     'GPR' : GPR,
-# }

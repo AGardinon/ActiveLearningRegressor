@@ -22,7 +22,7 @@ def active_learning_cycle(
 
     # 1.
     y_pred, landscape = landscape_acquisition(X_candidates=X_candidates, 
-                                              gp_model=model, 
+                                              ml_model=model, 
                                               acquisition_mode=acquisition_mode)
     
     # 2.

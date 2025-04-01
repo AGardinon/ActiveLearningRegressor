@@ -2,6 +2,8 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
+from activereg.utils import create_experiment_name
 
 # ---------------------------------------------------------------------------
 # --- PLOT FUNC
@@ -29,10 +31,9 @@ def plot_2Dcycle(train_set, next_set, pool_set, pred_set, landscape_set, name_se
     ax[2].scatter(*Xt.T,c=yt,s=30,cmap=cmap,vmin=min(y),vmax=max(y),marker='o',edgecolor='black',zorder=3)
 
     fig.tight_layout()
-    fig_name_list = [str(i) for i in name_set[1:]]
-    fig_name = fig_name_list[0]+"_".join(fig_name_list[1:])
-    fig_name = fig_name+'.png'
-    fig.savefig(name_set[0] / fig_name)
+    out_dir = name_set[0]
+    fig_name = create_experiment_name(name_set=name_set[1:])
+    fig.savefig(out_dir / Path(fig_name+'.png'))
     if show:
         plt.show()
 

@@ -28,14 +28,18 @@ def landscape_acquisition(X_candidates: np.ndarray, ml_model, acquisition_mode: 
 def upper_confidence_bound(X_candidates: np.ndarray, ml_model, kappa: float=2.0) -> Tuple[np.ndarray]:
     """
     Acquisition function: Upper Confidence Bound (UCB)
+    The method assumes one of the activereg.mlmodel is used, where the predict statment
+    automatically returns mean and standard dev.
     """
-    mu, sigma = ml_model.predict(X_candidates, return_std=True)
+    _, mu, sigma = ml_model.predict(X_candidates)
     return mu, mu + kappa * sigma
 
 
 def explore_uncertainty(X_candidates: np.ndarray, ml_model) -> Tuple[np.ndarray]:
     """
     Explore using the model uncertainty landscape
+    The method assumes one of the activereg.mlmodel is used, where the predict statment
+    automatically returns mean and standard dev.
     """
-    mu, sigma = ml_model.predict(X_candidates, return_std=True)
+    _, mu, sigma = ml_model.predict(X_candidates)
     return mu, sigma

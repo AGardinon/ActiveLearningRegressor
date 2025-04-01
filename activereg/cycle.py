@@ -1,14 +1,15 @@
 #!
 
 from activereg.sampling import sample_landscape
-from activereg.acquisition import landscape_acquisition, highest_landscape_selection
+from activereg.acquisition import AcquisitionFunction, highest_landscape_selection
 
 
 def active_learning_cycle(
         X_candidates,
         y_candidates,
+        y_best,
         model, 
-        acquisition_mode, 
+        acquisition_parameters,
         percentile,
         n_batch,
         sampling_mode
@@ -21,9 +22,8 @@ def active_learning_cycle(
     """
 
     # 1.
-    y_pred, landscape = landscape_acquisition(X_candidates=X_candidates, 
-                                              ml_model=model, 
-                                              acquisition_mode=acquisition_mode)
+    acqui_fun = AcquisitionFunction(y_best=y_best, **acquisition_parameters)
+    y_pred, landscape = acqui_fun.landscape_acquisition(X_candidates=X_candidates, ml_model=model)
     
     # 2.
     acq_landscape_ndx = highest_landscape_selection(landscape=landscape, 

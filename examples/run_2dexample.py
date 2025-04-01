@@ -16,7 +16,7 @@ def run_2Dexperiment(
         n_batch: int,
         init_sampling_mode: str,
         n_cycles: int,
-        acquisition_mode: str,
+        acquisition_parameters: dict,
         percentile: int,
         sampling_mode: str,
         out_dir: str):
@@ -41,17 +41,18 @@ def run_2Dexperiment(
 
     # 2. cycles
     for c in range(n_cycles):
-
         print(f'Cycle: {c+1}')
+        y_best = max(y_train)
 
         X_next, y_next, y_pred, landscape, X_acq_landscape, sampled_new_idx = active_learning_cycle(
             X_candidates=X_candidates,
             y_candidates=y_candidates,
+            y_best=y_best,
             model=ml_model,
-            acquisition_mode=acquisition_mode,
+            acquisition_parameters=acquisition_parameters,
             percentile=percentile,
             n_batch=n_batch,
-            sampling_mode=sampling_mode
+            sampling_mode=sampling_mode,
         )
 
         # - plt
@@ -60,7 +61,9 @@ def run_2Dexperiment(
                     pool_set=(X_pool,y_pool,'coolwarm'),
                     next_set=(X_next,y_next),
                     landscape_set=(landscape,X_acq_landscape,'plasma'),
-                    name_set=(out_dir,'fig_',init_sampling_mode_str,acquisition_mode,sampling_mode,c))
+                    name_set=(out_dir,'fig_',init_sampling_mode_str,
+                              acquisition_parameters['acquisition_mode'],sampling_mode,c)
+                    )
 
         # 5. update the trainig set
         X_train = np.vstack((X_train, X_next))
@@ -99,7 +102,6 @@ if __name__ == '__main__':
 
     # 2. ml
     ml_config = config['ml']
-    print(ml_config)
 
     if ml_config['ml_model'] == 'GPR':
         from activereg.mlmodel import GPR, KernelFactory

@@ -171,4 +171,4 @@ cython_debug/
 .pypirc
 
 # hide test example folder
-./examples/*
+./examples/

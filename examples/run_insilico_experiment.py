@@ -194,5 +194,5 @@ if __name__ == '__main__':
                                       ml_model=ml_model, out_dir=out_dir,
                                       **exp_config)
 
-    with open(exp_dir / Path('experiment_config.md'), "w") as f:
+    with open(exp_dir / Path('experiment_config.log'), "w") as f:
         yaml.dump(config, f, default_flow_style=False)

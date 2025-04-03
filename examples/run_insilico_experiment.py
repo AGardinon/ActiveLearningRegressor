@@ -13,7 +13,7 @@ from activereg.format import EXAMPLES_REPO
 
 # - func
 
-def run_2Dexperiment(
+def run_insilico_experiment(
         X_pool,
         y_pool,
         ml_model,
@@ -172,9 +172,9 @@ if __name__ == '__main__':
 
     # 3. experiment
     exp_config = config['experiment']
-    exp_dir = run_2Dexperiment(X_pool=X_pool, y_pool=y_pool,
-                               ml_model=ml_model, out_dir=out_dir,
-                               **exp_config)
+    exp_dir = run_insilico_experiment(X_pool=X_pool, y_pool=y_pool,
+                                      ml_model=ml_model, out_dir=out_dir,
+                                      **exp_config)
 
     with open(exp_dir / Path('experiment_config.log'), "w") as f:
         yaml.dump(config, f, default_flow_style=False)

@@ -3,7 +3,14 @@ import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, WhiteKernel
 from sklearn.gaussian_process.kernels import RBF, Matern, RationalQuadratic
-from typing import Tuple, List, Dict, Union
+from typing import Tuple, List, Dict, Union, Protocol
+
+# Generic MLModel class
+
+class MLModel(Protocol):
+    def train(self, X: np.ndarray, y: np.ndarray) -> None: ...
+    def predict(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: ...
+    def __repr__(self) -> str: ...
 
 # - GAUSSIAN PROCESS REGRESSOR
 

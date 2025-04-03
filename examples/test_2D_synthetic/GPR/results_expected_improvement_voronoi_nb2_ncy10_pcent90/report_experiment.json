@@ -1,0 +1,16 @@
+{
+    "ml_model": "GPR(log_transform=False, kernel=RBF(length_scale=0.627), trained=True)",
+    "n_cycles": 10,
+    "n_batch": 2,
+    "init_sampling_mode": [
+        1292,
+        6480,
+        0,
+        6546
+    ],
+    "acquisition_parameters": {
+        "acquisition_mode": "expected_improvement"
+    },
+    "percentile": 90,
+    "sampling_mode": "voronoi"
+}

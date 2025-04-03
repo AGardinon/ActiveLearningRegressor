@@ -24,6 +24,18 @@ def run_2Dexperiment(
         percentile: int,
         sampling_mode: str,
         out_dir: str):
+    
+    # 0. Create experiment folder
+    exp_folder = create_experiment_name(name_set=(
+        'results_',acquisition_parameters['acquisition_mode'],sampling_mode,
+        f'nb{n_batch}',f'ncy{n_cycles}',f'pcent{percentile}'))
+    out_dir = out_dir / exp_folder
+    if out_dir.exists():
+        counter = 1
+        while (new_out_dir := out_dir.parent / f"{out_dir.name}_{counter}").exists():
+            counter += 1
+        out_dir = new_out_dir
+    out_dir.mkdir(exist_ok=False)
 
     # 1. init experiment
     # Sample initial points
@@ -48,10 +60,11 @@ def run_2Dexperiment(
     y_sampled = []
     cycles_label = []
     cycle_predictions = []
+    cycle_predictions_uncertainty = []
 
     X_sampled.append(X_train)
     y_sampled.append(y_train)
-    cycles_label.append([0]*n_batch)
+    cycles_label.append([0]*len(init_idx))
 
     # 2. cycles
     for c in range(n_cycles):
@@ -84,7 +97,8 @@ def run_2Dexperiment(
         X_sampled.append(X_next)
         y_sampled.append(y_next)
         cycles_label.append([c+1]*n_batch)
-        cycle_predictions.append(y_pred)
+        cycle_predictions.append(ml_model.predict(x=X_pool)[1])
+        cycle_predictions_uncertainty.append(ml_model.predict(x=X_pool)[2])
 
         # 4. update the trainig set
         X_train = np.vstack((X_train, X_next))
@@ -98,17 +112,17 @@ def run_2Dexperiment(
         ml_model.train(X_train, y_train)
 
     # 7. outputs
-    exp_name = create_experiment_name(name_set=(
-        'report_',acquisition_parameters['acquisition_mode'],sampling_mode,
-        f'nb{n_batch}',f'ncy{n_cycles}')
-        )
+    print(f'Saving outputs in: {out_dir}')
 
     X_sampled = np.concatenate(X_sampled)
     al_report_df_dict = {f'X_s{v}' : X_sampled[:,v] for v in range(X_sampled.shape[1])}
     al_report_df_dict['y_s'] = np.concatenate(y_sampled)
     al_report_df_dict['cycles_label'] = np.concatenate(cycles_label)
     al_report_df = pd.DataFrame(al_report_df_dict)
-    al_report_df.to_csv(out_dir / Path(exp_name+'_exp.csv'))
+    al_report_df.to_csv(out_dir / Path('report_experiment.csv'), index=False)
+
+    np.save(out_dir / Path('cycle_predictions.npy'), np.array(cycle_predictions))
+    np.save(out_dir / Path('cycle_predictions_uncertainty.npy'), np.array(cycle_predictions_uncertainty))
 
     al_report_dict = {
         'ml_model' : ml_model.__repr__(),
@@ -119,11 +133,11 @@ def run_2Dexperiment(
         'percentile' : percentile,
         'sampling_mode' : sampling_mode,
     }
-    # outputs
-    with open(out_dir / Path(exp_name+"_exp_report.json"), "w") as f:
+
+    with open(out_dir / Path('report_experiment.json'), "w") as f:
         json.dump(al_report_dict, f, indent=4)
 
-    return exp_name
+    return out_dir
 
 
 if __name__ == '__main__':
@@ -143,11 +157,11 @@ if __name__ == '__main__':
     X_pool = np.load(EXAMPLES_REPO / 'data' / data_config['X_pool'])
     y_pool = np.load(EXAMPLES_REPO / 'data' / data_config['y_pool'])
     
-    out_dir = EXAMPLES_REPO / data_config['out_dir']
-    out_dir.mkdir(exist_ok=data_config['overwrite'])
-
     # 2. ml
     ml_config = config['ml']
+
+    out_dir = EXAMPLES_REPO / data_config['out_dir'] / ml_config['ml_model']
+    out_dir.mkdir(exist_ok=data_config['overwrite'], parents=True)
 
     if ml_config['ml_model'] == 'GPR':
         from activereg.mlmodel import GPR, KernelFactory
@@ -158,9 +172,9 @@ if __name__ == '__main__':
 
     # 3. experiment
     exp_config = config['experiment']
-    exp_name = run_2Dexperiment(X_pool=X_pool, y_pool=y_pool, 
-                                ml_model=ml_model, out_dir=out_dir, 
-                                **exp_config)
+    exp_dir = run_2Dexperiment(X_pool=X_pool, y_pool=y_pool,
+                               ml_model=ml_model, out_dir=out_dir,
+                               **exp_config)
 
-    with open(out_dir / Path(exp_name+'_config.log'), "w") as f:
+    with open(exp_dir / Path('experiment_config.log'), "w") as f:
         yaml.dump(config, f, default_flow_style=False)

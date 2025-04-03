@@ -1,30 +1,42 @@
 #!
 import yaml
 import json
+import joblib
 import argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from activereg.mlmodel import MLModel
 from activereg.sampling import sample_landscape
 from activereg.cycle import active_learning_cycle
 from activereg.beauty import plot_2Dcycle
 from activereg.utils import create_experiment_name
 from activereg.format import EXAMPLES_REPO
+from typing import Any
 
 # - func
 
 def run_insilico_experiment(
-        X_pool,
-        y_pool,
-        ml_model,
+        X_pool: np.ndarray,
+        y_pool: np.ndarray,
+        ml_model: MLModel,
         n_batch: int,
         init_sampling_mode: str,
         n_cycles: int,
         acquisition_parameters: dict,
         percentile: int,
         sampling_mode: str,
-        out_dir: str):
+        out_dir: str,
+        make_plot: bool=True,
+        ) -> Path:
     
+    """
+    Run an in-silico experiment on a dataset (X_pool,y_pool), where the `y_pool` is
+    also the GT and `X_pool` is the generic search space.
+    `ml_model` is an object that must have a .train() and .predict() functions as
+    implemented in the `activereg.mlmodel` module.
+    """
+
     # 0. Create experiment folder
     exp_folder = create_experiment_name(name_set=(
         'results_',acquisition_parameters['acquisition_mode'],sampling_mode,
@@ -84,14 +96,17 @@ def run_insilico_experiment(
         )
 
         # - plt
-        plot_2Dcycle(train_set=(X_train,y_train),
-                    pred_set=(X_candidates,y_pred),
-                    pool_set=(X_pool,y_pool,'coolwarm'),
-                    next_set=(X_next,y_next),
-                    landscape_set=(landscape,X_acq_landscape,'plasma'),
-                    name_set=(out_dir,'fig_',init_sampling_mode_str,
-                              acquisition_parameters['acquisition_mode'],sampling_mode,c)
-                    )
+        if make_plot:
+            # 2D data
+            if X_pool.shape[1] == 2:
+                plot_2Dcycle(train_set=(X_train,y_train),
+                            pred_set=(X_candidates,y_pred),
+                            pool_set=(X_pool,y_pool,'coolwarm'),
+                            next_set=(X_next,y_next),
+                            landscape_set=(landscape,X_acq_landscape,'plasma'),
+                            name_set=(out_dir,'fig_',init_sampling_mode_str,
+                                    acquisition_parameters['acquisition_mode'],sampling_mode,c)
+                            )
 
         # 3. report
         X_sampled.append(X_next)
@@ -137,6 +152,9 @@ def run_insilico_experiment(
     with open(out_dir / Path('report_experiment.json'), "w") as f:
         json.dump(al_report_dict, f, indent=4)
 
+    if 'GPR' in ml_model.__repr__():
+        joblib.dump(ml_model, out_dir / Path("gpr_model.pkl"))
+
     return out_dir
 
 
@@ -176,5 +194,5 @@ if __name__ == '__main__':
                                       ml_model=ml_model, out_dir=out_dir,
                                       **exp_config)
 
-    with open(exp_dir / Path('experiment_config.log'), "w") as f:
+    with open(exp_dir / Path('experiment_config.md'), "w") as f:
         yaml.dump(config, f, default_flow_style=False)

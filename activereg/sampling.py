@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans, MiniBatchKMeans
 from sklearn.metrics import pairwise_distances_argmin_min
+from sklearn.metrics.pairwise import euclidean_distances
 from typing import Union, List, Tuple
 
 
@@ -101,3 +102,18 @@ def voronoi(X, n_points, mode='MiniBatchKMeans'):
     closest, _ = pairwise_distances_argmin_min(kmeans.cluster_centers_, X)
 
     return closest
+
+# ---
+
+
+def diversity_weighted_uncertainty(X_acq_landscape, X_train, ml_model, beta=0.5):
+    _, _, std = ml_model.predict(X_acq_landscape, return_std=True)
+    
+    # Compute distance from each candidate to the nearest training point
+    dists = euclidean_distances(X_acq_landscape, X_train)
+    min_dists = dists.min(axis=1)
+
+    # Weight uncertainty by distance
+    score = std * (min_dists ** beta)  # beta controls tradeoff
+
+    return score

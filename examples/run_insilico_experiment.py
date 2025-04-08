@@ -9,7 +9,6 @@ from pathlib import Path
 from activereg.mlmodel import MLModel
 from activereg.sampling import sample_landscape
 from activereg.cycle import active_learning_cycle
-from activereg.beauty import plot_2Dcycle
 from activereg.utils import create_experiment_name
 from activereg.format import EXAMPLES_REPO
 from typing import Any
@@ -97,6 +96,7 @@ def run_insilico_experiment(
 
         # - plt
         if make_plot:
+            from activereg.beauty import plot_2Dcycle
             # 2D data
             if X_pool.shape[1] == 2:
                 plot_2Dcycle(train_set=(X_train,y_train),
@@ -171,28 +171,30 @@ if __name__ == '__main__':
     # Split the config files
     # 1. data
     data_config = config['data']
+    data_folder = Path(data_config['data_folder'])
 
-    X_pool = np.load(EXAMPLES_REPO / 'data' / data_config['X_pool'])
-    y_pool = np.load(EXAMPLES_REPO / 'data' / data_config['y_pool'])
+    X_pool = np.load(EXAMPLES_REPO / data_folder / data_config['X_pool'])
+    y_pool = np.load(EXAMPLES_REPO / data_folder / data_config['y_pool'])
     
     # 2. ml
     ml_config = config['ml']
 
-    out_dir = EXAMPLES_REPO / data_config['out_dir'] / ml_config['ml_model']
-    out_dir.mkdir(exist_ok=data_config['overwrite'], parents=True)
-
-    if ml_config['ml_model'] == 'GPR':
+    if ml_config['ml_model'] == 'GPR':    
         from activereg.mlmodel import GPR, KernelFactory
+
+        out_dir = EXAMPLES_REPO / data_config['out_dir'] / ml_config['ml_model'] / ml_config['kernel_recipe']['type']
 
         kernel = KernelFactory(kernel_recipe=ml_config['kernel_recipe']).get_kernel()
         ml_model = GPR(kernel=kernel, **ml_config['ml_model_param'])
         print(ml_model)
 
+    out_dir.mkdir(exist_ok=data_config['overwrite'], parents=True)
+
     # 3. experiment
     exp_config = config['experiment']
     exp_dir = run_insilico_experiment(X_pool=X_pool, y_pool=y_pool,
                                       ml_model=ml_model, out_dir=out_dir,
-                                      **exp_config)
+                                      **exp_config, make_plot=False)
 
     with open(exp_dir / Path('experiment_config.log'), "w") as f:
         yaml.dump(config, f, default_flow_style=False)

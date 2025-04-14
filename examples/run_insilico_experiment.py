@@ -8,7 +8,7 @@ import pandas as pd
 from pathlib import Path
 from activereg.mlmodel import MLModel
 from activereg.sampling import sample_landscape
-from activereg.cycle import active_learning_cycle
+from activereg.cycle import active_learning_cycle_insilico
 from activereg.utils import create_experiment_name
 from activereg.format import EXAMPLES_REPO
 from typing import Any
@@ -83,7 +83,7 @@ def run_insilico_experiment(
 
         y_best = max(y_train)
 
-        X_next, y_next, y_pred, landscape, X_acq_landscape, sampled_new_idx = active_learning_cycle(
+        X_next, y_next, y_pred, landscape, X_acq_landscape, sampled_new_idx = active_learning_cycle_insilico(
             X_candidates=X_candidates,
             y_candidates=y_candidates,
             y_best=y_best,
@@ -166,7 +166,7 @@ if __name__ == '__main__':
 
     # Load YAML file
     with open(args.config, "r") as file:
-        config = yaml.safe_load(file)  # Use safe_load instead of load
+        config = yaml.safe_load(file)
 
     # Split the config files
     # 1. data

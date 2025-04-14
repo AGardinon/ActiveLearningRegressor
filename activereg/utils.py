@@ -1,5 +1,6 @@
 #!
 import numpy as np
+from pathlib import Path
 from torch import Tensor
 from torch.utils.data import TensorDataset, DataLoader
 from typing import Tuple, List
@@ -89,3 +90,15 @@ def sinusoidal_landscape(X: np.ndarray, noise_level: float=0.1) -> np.ndarray:
     noise = noise_level * np.random.randn(X.shape[0])  # Optional noise
     return np.sum(np.sin(X), axis=1) + noise
 
+
+# FOLDERS
+
+
+def create_strict_folder(path_str: str) -> None:
+    """
+    Create a folder from a path string, no owerwrite.
+    """
+    path = Path(path_str)
+    if path.exists():
+        raise FileExistsError(f"Directory '{path}' already exists.")
+    path.mkdir(parents=True)

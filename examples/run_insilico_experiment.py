@@ -77,11 +77,17 @@ def run_insilico_experiment(
     y_sampled.append(y_train)
     cycles_label.append([0]*len(init_idx))
 
+    if acquisition_parameters['acquisition_mode'] == 'target_expected_improvement':
+        target_value = acquisition_parameters.pop('target_value')
+
     # 2. cycles
     for c in range(n_cycles):
         print(f'Cycle: {c+1}')
 
-        y_best = max(y_train)
+        if acquisition_parameters['acquisition_mode'] == 'target_expected_improvement':
+            y_best = target_value
+        else:
+            y_best = max(y_train)
 
         X_next, y_next, y_pred, landscape, X_acq_landscape, sampled_new_idx = active_learning_cycle_insilico(
             X_candidates=X_candidates,

@@ -1,5 +1,5 @@
 {
-    "ml_model": "GPR(log_transform=False, kernel=Matern(length_scale=0.51, nu=2.5), trained=True)",
+    "ml_model": "GPR(log_transform=False, kernel=Matern(length_scale=0.307, nu=2.5), trained=True)",
     "n_cycles": 10,
     "n_batch": 4,
     "init_sampling_mode": [
@@ -9,7 +9,8 @@
         1867
     ],
     "acquisition_parameters": {
-        "acquisition_mode": "expected_improvement"
+        "acquisition_mode": "target_expected_improvement",
+        "tolerance": 0.1
     },
     "percentile": 95,
     "sampling_mode": "voronoi"

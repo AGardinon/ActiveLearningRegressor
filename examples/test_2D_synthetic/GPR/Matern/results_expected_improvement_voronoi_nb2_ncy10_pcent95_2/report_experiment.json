@@ -1,7 +1,7 @@
 {
-    "ml_model": "GPR(log_transform=False, kernel=Matern(length_scale=0.51, nu=2.5), trained=True)",
+    "ml_model": "GPR(log_transform=False, kernel=Matern(length_scale=1.84, nu=2.5), trained=True)",
     "n_cycles": 10,
-    "n_batch": 4,
+    "n_batch": 2,
     "init_sampling_mode": [
         5186,
         267,

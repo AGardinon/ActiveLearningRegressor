@@ -13,7 +13,7 @@ from activereg.format import REPO_ROOT,FILE_TO_VAL
 
 exp_input_config = {
     'experiment_dir' : 'test_labAL_experiment',
-    'experiment_name' : 'test_labAL_2D',
+    'experiment_name' : 'test_labAL_2D_1',
 }
 
 data_input_config = {
@@ -29,7 +29,7 @@ KERNEL_RECIPE = ['*',
 ml_model_config = {
     'ml_model' : 'GPR',
     'ml_model_param' : {
-        'n_restarts_optimizer' : 15
+        'n_restarts_optimizer' : 20
     },
     'kernel_recipe' : KERNEL_RECIPE
 }
@@ -46,7 +46,7 @@ lab_al_config = {
 
 # MAIN
 
-CYCLE_NUMBER = 3
+CYCLE_NUMBER = 1
 GT_FILE = 'double_well_gaussian_gt.csv'
 
 

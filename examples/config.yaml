@@ -1,9 +1,9 @@
 data:
-  data_folder: 'synthetic_data/2D/'
-  out_dir: 'test_2D_synthetic'
+  data_folder: 'synthetic_data/3D/'
+  out_dir: 'test_3D_synthetic'
   overwrite: true
-  X_pool: 'regular_grid_2d_scaled.npy'
-  y_pool: 'sinusoidal_2d_property_noisy.npy'
+  X_pool: 'regular_grid_3d_scaled.npy'
+  y_pool: 'double_well_gaussian_property.npy'
 
 ml:
   ml_model: 'GPR'
@@ -19,17 +19,20 @@ experiment:
   n_cycles: 10
   acquisition_parameters:
     acquisition_mode: 'expected_improvement'
+    # target_value: -1.8
+    # tolerance: 0.1
     # kappa:
     # xi: 
   percentile: 95
   sampling_mode: 'voronoi'
-  init_sampling_mode:
-  - 1292
-  - 6480
-  - 0
-  - 6546
+  # init_sampling_mode:
+  # - 1292
+  # - 6480
+  # - 0
+  # - 6546
   # init_sampling_mode:
   # - 5186
   # - 267
   # - 451
   # - 1867
+  init_sampling_mode: 'random'

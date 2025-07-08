@@ -118,8 +118,9 @@ def run_insilico_experiment(
         X_sampled.append(X_next)
         y_sampled.append(y_next)
         cycles_label.append([c+1]*n_batch)
-        cycle_predictions.append(ml_model.predict(x=X_pool)[1])
-        cycle_predictions_uncertainty.append(ml_model.predict(x=X_pool)[2])
+        _, pred, pred_std = ml_model.predict(x=X_pool)
+        cycle_predictions.append(pred)
+        cycle_predictions_uncertainty.append(pred_std)
 
         # 4. update the trainig set
         X_train = np.vstack((X_train, X_next))

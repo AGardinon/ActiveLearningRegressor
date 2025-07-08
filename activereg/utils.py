@@ -1,9 +1,57 @@
 #!
 import numpy as np
+from scipy.stats import norm
 from pathlib import Path
 from torch import Tensor
 from torch.utils.data import TensorDataset, DataLoader
-from typing import Tuple, List
+from typing import Tuple, List, Dict
+
+
+# METRICS
+
+
+def evaluate_regression_metrics(y_true, y_mean, y_std, confidence=0.95) -> Dict:
+    """
+    Evaluate regression predictions with uncertainty estimates.
+
+    Args:
+        y_true (np.ndarray): True target values. Shape (N,)
+        y_mean (np.ndarray): Predicted mean values. Shape (N,)
+        y_std (np.ndarray): Predicted standard deviations. Shape (N,)
+        confidence (float): Confidence level for interval (default: 0.95)
+
+    Returns:
+        dict: Dictionary with RMSE, MAE, NLL, PICP, and MPIW
+    """
+    y_true = np.asarray(y_true)
+    y_mean = np.asarray(y_mean)
+    y_std = np.asarray(y_std)
+
+    # Basic error metrics
+    rmse = np.sqrt(np.mean((y_true - y_mean)**2))
+    mae = np.mean(np.abs(y_true - y_mean))
+
+    # Negative Log-Likelihood (Gaussian assumption)
+    nll = -np.mean(norm.logpdf(y_true, loc=y_mean, scale=y_std + 1e-6))  # add epsilon for numerical stability
+
+    # Prediction Interval Coverage Probability (PICP)
+    lower, upper = norm.interval(confidence, loc=y_mean, scale=y_std + 1e-6)
+    picp = np.mean((y_true >= lower) & (y_true <= upper))
+
+    # Mean Prediction Interval Width (MPIW)
+    z = norm.ppf(0.5 + confidence / 2)
+    mpiw = 2 * z * np.mean(y_std)
+
+    return {
+        "RMSE": rmse,
+        "MAE": mae,
+        "NLL": nll,
+        f"PICP@{int(confidence*100)}%": picp,
+        f"MPIW@{int(confidence*100)}%": mpiw
+    }
+
+
+# EXPERIMENTS
 
 
 def numpy_to_dataloader(x: np.ndarray, y: np.ndarray = None, **kwargs) -> DataLoader:

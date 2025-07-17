@@ -39,6 +39,81 @@ def plot_2Dcycle(train_set, next_set, pool_set, pred_set, landscape_set, name_se
 
     return fig, ax
 
+
+def add_table_to_plot(ax, data_dict, title="Model Information", 
+                      table_position='upper right', fontsize=9, 
+                      cell_facecolor="#ffffff", cell_alpha=0.8,
+                      cellLoc='left'):
+    """
+    Add a formatted table to a matplotlib axes object.
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        The axes object to add the table to
+    data_dict : dict
+        Dictionary of dictionaries containing the data to display
+    title : str, optional
+        Title for the table (not displayed visually)
+    table_position : str, optional
+        Position of the table ('upper right', 'upper left', etc.)
+    fontsize : int, optional
+        Font size for table text
+    cell_facecolor : str, optional
+        Background color of the cells
+    cell_alpha : float, optional
+        Transparency of the background color
+    cellLoc : str, optional
+        Cell alignment ('left', 'center', 'right')
+    
+    Returns:
+    --------
+    table : matplotlib.table.Table
+        The created table object
+    """
+    
+    # Flatten the nested dictionary into a list of rows
+    table_data = []
+    for section, values in data_dict.items():
+        table_data.append([f"{section}:", ""])
+        for key, value in values.items():
+            if isinstance(value, float):
+                if abs(value) < 1e-3 or abs(value) > 1e3:
+                    formatted_value = f"{value:.2e}"
+                else:
+                    formatted_value = f"{value:.2f}"
+            else:
+                formatted_value = str(value)
+            table_data.append([f"  {key}", formatted_value])
+        if section != list(data_dict.keys())[-1]:
+            table_data.append(["", ""])
+
+    # Create the table
+    table = ax.table(cellText=table_data,
+                     colLabels=None,
+                     loc=table_position,
+                     cellLoc=cellLoc)
+
+    # Table styling
+    table.auto_set_font_size(False)
+    table.set_fontsize(fontsize)
+    table.scale(1, 1.3)
+
+    # Style section headers
+    for i, row in enumerate(table_data):
+        is_header = row[0].endswith(':') and not row[0].startswith('  ')
+        for j in range(2):
+            cell = table[i, j]
+            if is_header:
+                cell.set_text_props(weight='bold')
+                cell.set_facecolor('#f0f0f0')
+            else:
+                cell.set_facecolor(cell_facecolor)
+            cell.set_alpha(cell_alpha)
+            cell.set_linewidth(0)
+
+    return table
+
 # ---------------------------------------------------------------------------
 # --- PLOT UTILITIES
 
@@ -86,5 +161,15 @@ def remove_frame(axes) -> None:
     axes.xaxis.set_ticks_position('none')
     axes.yaxis.set_ticks_position('none')
     pass
+
+
+def set_identical_axes(axes) -> None:
+    axes.set_xlim(min(axes.get_xlim()[0], axes.get_ylim()[0]), 
+                  max(axes.get_xlim()[1], axes.get_ylim()[1]))
+    axes.set_ylim(axes.get_xlim())
+
+    # Set identical ticks
+    ticks = axes.get_xticks()
+    axes.set_yticks(ticks)
 
 # --- ////////////// ---#

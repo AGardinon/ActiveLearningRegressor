@@ -1,12 +1,55 @@
 #!
 
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+
 from pathlib import Path
+from scipy.interpolate import griddata
 from activereg.utils import create_experiment_name
 
 # ---------------------------------------------------------------------------
 # --- PLOT FUNC
+
+def plot2D_surfaceplot(
+        df: pd.DataFrame,
+        pdf: np.ndarray,
+        var1: str,
+        var2: str,
+        levels: int|list,
+        cmap: str,
+        contours_dict: dict,
+        axis
+    ) -> None:
+    
+    X = df[var1]
+    Y = df[var2]
+
+    surface_edges = .0
+
+    # Determine the range for X and Y
+    x_min, x_max = X.min()-surface_edges, X.max()+surface_edges
+    y_min, y_max = Y.min()-surface_edges, Y.max()+surface_edges
+
+    Z = pdf
+
+    # Generate a grid and interpolate the diffusion coefficients
+    bins=100j
+    grid_x, grid_y = np.mgrid[x_min:x_max:bins, y_min:y_max:bins]
+    grid_z = griddata((X, Y), Z, (grid_x, grid_y), method='linear')
+    grid_z = np.round(grid_z, decimals=4)
+
+    contours = axis.contour(
+        grid_x, grid_y, grid_z,
+        levels=levels, colors='.0')
+    axis.clabel(contours, inline=True, **contours_dict)
+
+    contours = axis.contourf(
+        grid_x, grid_y, grid_z, 
+        levels=levels, cmap=cmap)
+
+    axis.set_xlabel(var1)
+    axis.set_ylabel(var2)
 
 
 def plot_2Dcycle(train_set, next_set, pool_set, pred_set, landscape_set, name_set, show=False):

@@ -48,6 +48,7 @@ class GPR:
                  **kwargs) -> None:
         
         self.log_transform = log_transform
+        self.eps = 1e-8
         self.use_gridsearch = use_gridsearch
         self.cv = cv
         self.scoring = scoring
@@ -72,13 +73,12 @@ class GPR:
         if param_grid is None:
             self.param_grid = {
                 'kernel' : [
-                    ConstantKernel(1.0) * Matern(lc, nu=nu) + WhiteKernel(noise_level=noise)
-                    for nu in [0.5, 1.5, 2.5]
-                    for lc in [0.01, 0.1, 1.0, 10, 100]
+                    ConstantKernel(1.0) * RBF(lc) + WhiteKernel(noise_level=noise)
+                    for lc in [0.01, 0.1, 1.0, 10]
                     for noise in [.75, .5, .25, 0.1]
                 ],
                 'alpha': [1e-12, 1e-10, 1e-8, 1e-6, 1e-4],
-                'normalize_y': [True],
+                'normalize_y': [True, False],
                 'n_restarts_optimizer': [50]
             }
         else:
@@ -103,7 +103,7 @@ class GPR:
     def train(self, x: np.ndarray, y: np.ndarray) -> None:
         """Train the model with optional hyperparameter tuning"""
         if self.log_transform:
-            y = np.log10(y)
+            y = np.log10(y + self.eps)
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=ConvergenceWarning)
@@ -127,11 +127,14 @@ class GPR:
         y_hat_mean, y_hat_uncertainty = predictor.predict(x, return_std=True)
         
         if self.log_transform:
+            # Store the log-scale predictions
+            y_hat_log = y_hat_mean
             # Convert mean back to original scale
-            y_hat_mean = 10 ** y_hat_mean
-            # Apply delta method to transform standard deviation
-            variance_original = (10 ** y_hat_mean * np.log(10)) ** 2 * y_hat_uncertainty ** 2
-            # Calculate the standard deviation in the original scale
+            y_hat_mean = 10 ** y_hat_log
+            # Apply delta method using log-scale values
+            # Derivative of 10^x is 10^x * ln(10)
+            derivative = y_hat_mean * np.log(10)  # This is 10^y_hat_log * ln(10)
+            variance_original = (derivative ** 2) * (y_hat_uncertainty ** 2)
             y_hat_uncertainty = np.sqrt(variance_original)
         
         # Dummy variable as they are identical

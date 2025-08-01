@@ -1,10 +1,13 @@
 #!
+
+import json
 import numpy as np
+from datetime import datetime
 from scipy.stats import norm
 from pathlib import Path
 from torch import Tensor
 from torch.utils.data import TensorDataset, DataLoader
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Any
 
 
 # METRICS
@@ -139,8 +142,7 @@ def sinusoidal_landscape(X: np.ndarray, noise_level: float=0.1) -> np.ndarray:
     return np.sum(np.sin(X), axis=1) + noise
 
 
-# FOLDERS
-
+# FOLDERS & FILES
 
 def create_strict_folder(path_str: str) -> None:
     """
@@ -150,3 +152,24 @@ def create_strict_folder(path_str: str) -> None:
     if path.exists():
         raise FileExistsError(f"Directory '{path}' already exists.")
     path.mkdir(parents=True)
+
+
+def save_to_json(dictionary: Dict[Any, Any], fout_name: str, timestamp: bool=True) -> None:
+    """
+    Saves a dictionary to a JSON file with a timestamp appended to the file name.
+
+    Parameters:
+    - dictionary (Dict[Any, Any]): The dictionary to save.
+    - fout_name (str): The base name of the output file (without extension).
+
+    Returns:
+    - None
+    """
+    if timestamp:
+        timestamp_str = datetime.now().strftime('%b_%d_%Y')
+        fout_name = f"{fout_name}_{timestamp_str}"
+    
+    with open(f"{fout_name}.json", 'w') as f:
+        json.dump(dictionary, f, indent=4)
+    print(f"JSON saved: {fout_name}.json")
+

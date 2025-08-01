@@ -173,5 +173,6 @@ cython_debug/
 # hide notebooks
 *.ipynb
 examples/
-regression_experiment_1/
-test_labAL_experiment/
+test_experiments_labAL/
+lab_experiments/
+

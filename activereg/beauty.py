@@ -19,13 +19,12 @@ def plot2D_surfaceplot(
         levels: int|list,
         cmap: str,
         contours_dict: dict,
-        axis
+        axis,
+        surface_edges: float=0.,
     ) -> None:
     
     X = df[var1]
     Y = df[var2]
-
-    surface_edges = .0
 
     # Determine the range for X and Y
     x_min, x_max = X.min()-surface_edges, X.max()+surface_edges

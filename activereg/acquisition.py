@@ -51,7 +51,8 @@ class AcquisitionFunction:
         self.modes = ['upper_confidence_bound', 
                       'uncertainty_landscape', 
                       'expected_improvement',
-                      'target_expected_improvement']
+                      'target_expected_improvement',
+                      'exploration_mutual_info']
         assert acquisition_mode in self.modes, f'Function "{acquisition_mode}" not implemented, choose from {self.modes.keys()}'
 
         # additional parameters
@@ -70,13 +71,20 @@ class AcquisitionFunction:
             return uncertainty_landscape(X_candidates=X_candidates, ml_model=ml_model)
 
         elif self.acquisition_mode == 'expected_improvement':
-            return expected_improvement(X_candidates=X_candidates, ml_model=ml_model, y_best=self.y_best, xi=self.xi)
+            return expected_improvement(X_candidates=X_candidates, 
+                                        ml_model=ml_model, 
+                                        y_best=self.y_best, 
+                                        xi=self.xi)
         
         elif self.acquisition_mode == 'target_expected_improvement':
-            return target_expected_improvement(X_candidates=X_candidates, ml_model=ml_model, 
+            return target_expected_improvement(X_candidates=X_candidates, 
+                                               ml_model=ml_model, 
                                                y_target=self.y_target, 
                                                dist=self.dist, 
                                                epsilon=self.epsilon)
+        
+        elif self.acquisition_mode == 'exploration_mutual_info':
+            return exploration_mutual_info(X_candidates=X_candidates, ml_model=ml_model)
 
 # '''
 # The methods assume one of the activereg.mlmodel is used, where the predict statment
@@ -114,6 +122,23 @@ def uncertainty_landscape(X_candidates: np.ndarray, ml_model) -> Tuple[np.ndarra
     """
     _, mu, sigma = ml_model.predict(X_candidates)
     return mu, sigma
+
+
+def exploration_mutual_info(X_candidates, ml_model):
+    """
+    Score(x) = 0.5 * log(1 + sigma_f^2 / noise_var).
+    `noise_var` = observational noise variance (e.g., WhiteKernel(noise_level) from sklearn GPR).
+    """
+    try:
+        noise_var = ml_model.model.kernel_.k2.noise_level
+    except:
+        raise ValueError('noise_level not found, GPR needs to be trained with a WhiteKernel().')
+
+    _, mu, sigma_y = ml_model.predict(X_candidates)
+    sigma_y = np.maximum(sigma_y, 1e-12)
+    sigma_f2 = np.maximum(sigma_y**2 - noise_var, 0.0)
+    score = 0.5 * np.log1p(sigma_f2 / np.maximum(noise_var, 1e-12))
+    return mu, score
 
 
 def expected_improvement(X_candidates: np.ndarray, ml_model, y_best: float, xi: float = 0.01) -> Tuple[np.ndarray]:

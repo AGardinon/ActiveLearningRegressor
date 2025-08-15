@@ -3,6 +3,8 @@
 import torch
 import numpy as np
 from scipy.stats import norm
+from scipy.spatial import cKDTree
+# from sklearn.metrics import pairwise_distances
 from typing import Tuple
 
 def highest_landscape_selection(landscape: np.ndarray, percentile: int=80):
@@ -12,6 +14,32 @@ def highest_landscape_selection(landscape: np.ndarray, percentile: int=80):
     """
     threshold = np.percentile(landscape, percentile)
     return np.where(landscape >= threshold)[0]
+
+
+def penalize_landscape_fast(
+    landscape: np.ndarray,
+    X_candidates: np.ndarray,
+    X_train: np.ndarray,
+    radius: float = 0.1,
+    strength: float = 1.0
+    ) -> np.ndarray:
+    """
+    Fast version for large candidate sets using cKDTree.
+    """
+    if X_train.shape[0] == 0:
+        return landscape
+
+    # Build KDTree for screened points
+    tree = cKDTree(X_train)
+
+    # Query nearest distance for each candidate
+    min_dists, _ = tree.query(X_candidates, k=1)
+
+    # Gaussian penalty
+    penalties = np.exp(- (min_dists**2) / (2 * radius**2))
+    corrected = landscape * (1 - strength * penalties)
+    
+    return corrected
 
 
 class AcquisitionFunction:
@@ -28,11 +56,11 @@ class AcquisitionFunction:
 
         # additional parameters
         self.y_best = y_best
-        # !!!
-        self.y_target = y_best
+        self.y_target = kwargs.get('y_target', y_best)
         self.kappa = kwargs.get('kappa', 2.0)
         self.xi = kwargs.get('xi', 1.e-2)
-        self.tolerance = kwargs.get('tolerance', 0.05)
+        self.dist = kwargs.get('dist', None)
+        self.epsilon = kwargs.get('epsilon', None)
 
     def landscape_acquisition(self, X_candidates: np.ndarray, ml_model):
         if self.acquisition_mode == 'upper_confidence_bound':
@@ -46,7 +74,9 @@ class AcquisitionFunction:
         
         elif self.acquisition_mode == 'target_expected_improvement':
             return target_expected_improvement(X_candidates=X_candidates, ml_model=ml_model, 
-                                               y_target=self.y_target, tolerance=self.tolerance, xi=self.xi)
+                                               y_target=self.y_target, 
+                                               dist=self.dist, 
+                                               epsilon=self.epsilon)
 
 # '''
 # The methods assume one of the activereg.mlmodel is used, where the predict statment
@@ -116,44 +146,55 @@ def expected_improvement(X_candidates: np.ndarray, ml_model, y_best: float, xi: 
     # Ensure non-negative values (since EI is max(0, ...))
     return mu, np.maximum(ei, 0)
 
-def target_expected_improvement(X_candidates: np.ndarray, ml_model, y_target: float, 
-                              tolerance: float = 0.1, xi: float = 0.01) -> Tuple[np.ndarray, np.ndarray]:
+
+def target_expected_improvement(X_candidates, ml_model, y_target, *,
+                dist=None,        # use this for best-closeness TEI: d = current best distance to target
+                epsilon=None,  # use this for band TEI: epsilon = tolerance
+                clip_sigma=1e-12):
     """
-    Acquisition function: Expected Improvement toward a target value.
-    
-    Parameters:
-    - X_candidates (np.ndarray): The candidate points where EI will be evaluated.
-    - ml_model: A trained model from the models class (must support .predict with return_std=True).
-    - y_target (float): The target value you want to achieve.
-    - tolerance (float): Acceptable deviation from target (defines "success region").
-    - xi (float): Exploration-exploitation tradeoff parameter (higher xi = more exploration).
-    
-    Returns:
-    - np.ndarray: predicted values.
-    - np.ndarray: Target-oriented EI values for each candidate point.
+    Mathematically derived Targeted Expected Improvement (TEI).
+    Improvement: (d - |Y - t|)_+ where d = epsilon (band TEI) OR d = best_closeness (best-TEI).
+
+    Parameters
+    ----------
+    X_candidates : (N, D) array
+    ml_model     : has .predict(X, return_std=True) or wrapper equivalent returning (.., mu, sigma)
+    y_target     : float, target value t
+    d            : float, current best closeness to target (min_i |y_i - t|). Use for best-TEI
+    epsilon      : float, tolerance half-width. Use for band-TEI
+    clip_sigma   : float, min sigma to avoid division by zero
+
+    Returns
+    -------
+    mu : (N,) mean predictions
+    tei: (N,) TEI scores (maximize this)
     """
-    # Get mean and standard deviation from the model
+    if (dist is None) == (epsilon is None):
+        raise ValueError("Provide exactly one of `d` (best closeness) or `epsilon` (band width).")
+
+    d_val = float(epsilon if dist is None else dist)
     _, mu, sigma = ml_model.predict(X_candidates)
-    
-    # Avoid division by zero
-    sigma = sigma.clip(min=1e-9)
-    
-    # Method 1: Add xi as exploration bonus to uncertainty
-    # Higher xi increases the value of high-uncertainty regions
-    exploration_bonus = xi * sigma
-    
-    # Define the target region bounds
-    target_lower = y_target - tolerance
-    target_upper = y_target + tolerance
-    
-    # Calculate probability of being in target region
-    prob_in_target = (norm.cdf((target_upper - mu) / sigma) - 
-                     norm.cdf((target_lower - mu) / sigma))
-    
-    # Expected distance from target (penalize being far from target)
-    expected_distance = np.abs(mu - y_target)
-    
-    # Combined acquisition with exploration bonus
-    target_ei = (prob_in_target / (1 + expected_distance)) + exploration_bonus
-    
-    return mu, target_ei
+    sigma = np.clip(sigma, clip_sigma, None)
+
+    t = float(y_target)
+    a = t - d_val
+    b = t + d_val
+
+    z1 = (a - mu) / sigma
+    z0 = (t - mu) / sigma
+    z2 = (b - mu) / sigma
+
+    Phi = norm.cdf
+    phi = norm.pdf
+
+    dPhi1 = Phi(z0) - Phi(z1)
+    dPhi2 = Phi(z2) - Phi(z0)
+
+    tei = ( (d_val - t + mu) * dPhi1
+          + (d_val + t - mu) * dPhi2
+          + sigma * (phi(z1) - 2.0 * phi(z0) + phi(z2)) )
+
+    # numerical safety
+    tei = np.maximum(tei, 0.0)
+    return mu, tei
+

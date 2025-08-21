@@ -165,11 +165,19 @@ def save_to_json(dictionary: Dict[Any, Any], fout_name: str, timestamp: bool=Tru
     Returns:
     - None
     """
+    if isinstance(fout_name, Path):
+        fout_name = str(fout_name)
+
     if timestamp:
         timestamp_str = datetime.now().strftime('%b_%d_%Y')
         fout_name = f"{fout_name}_{timestamp_str}"
+
+    if not str(fout_name).endswith('.json'):
+        fout_name += '.json'
     
-    with open(f"{fout_name}.json", 'w') as f:
+    fout_name = Path(fout_name)
+
+    with open(fout_name, 'w') as f:
         json.dump(dictionary, f, indent=4)
-    print(f"JSON saved: {fout_name}.json")
+    print(f"JSON saved: {fout_name}")
 

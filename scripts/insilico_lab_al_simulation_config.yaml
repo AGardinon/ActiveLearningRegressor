@@ -1,0 +1,35 @@
+experiment_name: "insilico_lab_al_simulation_1"
+experiment_notes: "acqui_func.landscape_acquisition() with penalize landscape and predictiong only on candidates."
+experiment_evidence:
+
+search_space_variables:
+  - "x1"
+  - "x2"
+
+target_variables:
+  - "Number_of_Particles"
+
+init_batch_size: 8
+n_cycles: 10
+
+init_sampling: "fps"
+cycle_sampling: "voronoi"
+
+# List of acquisition parameters functions to be used in the simulation
+acquisition_parameters:
+  - acquisition_mode: "expected_improvement"
+    percentile: 97
+    n_points: 1
+
+  - acquisition_mode: "target_expected_improvement"
+    percentile: 97
+    n_points: 1
+    y_target: 800
+    epsilon: 0.25
+
+  - acquisition_mode: "exploration_mutual_info"
+    percentile: 97
+    n_points: 2
+
+# Path to the ground truth file in the datasets directory
+ground_truth_file: "gt_number_of_particles_maternw.csv"

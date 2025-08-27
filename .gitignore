@@ -175,4 +175,5 @@ cython_debug/
 examples/
 test_experiments_labAL/
 lab_experiments/
+insilico_al/
 

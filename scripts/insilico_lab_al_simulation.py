@@ -263,7 +263,7 @@ if __name__ == '__main__':
             print(f'Cycle {cycle} - Candidates shape: {X_candidates.shape}, Training shape: {X_train.shape}')
 
             # Compute the best target value from the training set
-            y_best = max(y_train)
+            y_best = np.max(y_train)
 
             # Train model on evidence and predict on candidates
             ML_MODEL.train(X_train, y_train)
@@ -288,7 +288,7 @@ if __name__ == '__main__':
                 'screened_indexes' : np.array(screened_indexes).astype(int).tolist(),
                 'candidates_df_shape' : candidates_df.shape,
                 'train_df_shape' : train_df.shape,
-                'y_best' : float(y_best),
+                'y_best' : y_best,
                 'nll' : ML_MODEL.model.log_marginal_likelihood().astype(float),
                 'model_params' : ML_MODEL.__repr__()
             }
@@ -305,8 +305,6 @@ if __name__ == '__main__':
                 'y_pred': y_pred,
                 'y_uncertainty': y_unc
             })
-
-            print(landscape.shape, len(ACQUI_PARAMS))
             
             for i, acqui_param in enumerate(ACQUI_PARAMS):
                 col_name = f"landscape_{acqui_param['acquisition_mode']}"

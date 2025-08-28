@@ -154,7 +154,7 @@ def create_strict_folder(path_str: str) -> None:
     path.mkdir(parents=True)
 
 
-def save_to_json(dictionary: Dict[Any, Any], fout_name: str, timestamp: bool=True) -> None:
+def save_to_json(dictionary: Dict[Any, Any], fout_name: str, timestamp: bool=True, verbose: bool=False) -> None:
     """
     Saves a dictionary to a JSON file with a timestamp appended to the file name.
 
@@ -179,5 +179,6 @@ def save_to_json(dictionary: Dict[Any, Any], fout_name: str, timestamp: bool=Tru
 
     with open(fout_name, 'w') as f:
         json.dump(dictionary, f, indent=4)
-    print(f"JSON saved: {fout_name}")
+    if verbose:
+        print(f"JSON saved: {fout_name}")
 

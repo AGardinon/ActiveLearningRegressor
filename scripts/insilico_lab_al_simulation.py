@@ -2,172 +2,16 @@
 
 import yaml
 import argparse
-# from pprint import pprint
-from typing import Any, List, Tuple
-
 import joblib
 import pandas as pd
 import numpy as np
-import activereg.mlmodel as regmodels
-from pathlib import Path
 from activereg.utils import create_strict_folder
-from sklearn.gaussian_process.kernels import ConstantKernel, WhiteKernel
-from sklearn.gaussian_process.kernels import RBF, Matern, RationalQuadratic
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.metrics import root_mean_squared_error
 from activereg.sampling import sample_landscape
-from activereg.acquisition import AcquisitionFunction, highest_landscape_selection, penalize_landscape_fast
 from activereg.utils import save_to_json
-
-# INIT
-# EXP_NAME = 'labsim_benchmark_1'
-# ADDITIONAL_NOTES = 'acqui_func.landscape_acquisition() with penalize landscape and predictiong only on candidates.'
-
-# POOL_CSV_FILENAME = 'single_variable_doe_POOL.csv'
-# CANDIDATES_CSV_FILENAME = 'single_variable_doe_CANDIDATES.csv'
-# TRAIN_CSV_FILENAME = 'single_variable_doe_TRAIN.csv'
-# POOL_CSV_PATH = Path(EXP_NAME + '/dataset/' + POOL_CSV_FILENAME)
-# TRAIN_CSV_PATH = Path(EXP_NAME + '/dataset/' + TRAIN_CSV_FILENAME)
-# CANDIDATES_CSV_PATH = Path(EXP_NAME + '/dataset/' + CANDIDATES_CSV_FILENAME)
-
-# SEARCH_VAR = ['x1', 'x2']
-# TARGET_VAR = ['Number_of_Particles']
-
-# ## Dataset
-# gt_df_name = 'gt_number_of_particles_maternw.csv'
-# gt_df = pd.read_csv(f'../datasets/{gt_df_name}')
-# target_var = 'Number_of_Particles'
-
-# ## Exp variables
-# N_CYCLES = 3
-# INIT_SAMPLING = 'fps'
-# CYCLE_SAMPLING = 'voronoi'
-
-# ACQUI_PARAMS_EXPLOIT = {
-#     'acquisition_mode' : 'expected_improvement',
-#     'percentile' : 97,
-#     'n_points' : 1
-# }
-
-# ACQUI_PARAMS_EXPLOIT_TARGET = {
-#     'acquisition_mode' : 'target_expected_improvement',
-#     'y_target' : 800,
-#     'epsilon' : 25,
-#     'percentile' : 97,
-#     'n_points' : 1
-# }
-
-# ACQUI_PARAMS_EXPLORE = {
-#     'acquisition_mode' : 'exploration_mutual_info',
-#     'percentile' : 95,
-#     'n_points' : 2
-# }
+from pathlib import Path
+from typing import List, Tuple
 
 # FUNCTIONS
-
-# # Define acquisition parameters
-# def get_acquisition_params(param_list: list[dict]) -> list[dict]:
-#     """Defines acquisition parameters for the active learning cycle.
-
-#     Args:
-#         param_list (list[dict]): List of dictionaries with acquisition parameters.
-
-#     Returns:
-#         list[dict]: unified list of acquisition parameters.
-#     """
-#     return [
-#         {
-#             'acquisition_mode': param['acquisition_mode'],
-#             'percentile': param.get('percentile', 95),
-#             'n_points': param['n_points'],
-#             **{k: v for k, v in param.items() if k not in ['acquisition_mode', 'percentile', 'n_points']}
-#         }
-#         for param in param_list
-#     ]
-
-
-# def setup_data_pool(df: pd.DataFrame, search_var: list[str]) -> tuple:
-#     """Gets the search space and scales it using StandardScaler.
-
-#     Args:
-#         df (pd.DataFrame): pool dataframe.
-#         search_var (list[str]): list of search variable names.
-
-#     Returns:
-#         df_scaled_array, scaler (np.ndarray, Any): scaled search space as a numpy array and the scaler used.
-#     """
-#     scaler = StandardScaler()
-#     df = df.copy()
-
-#     if search_var is None:
-#         search_var = df.columns.tolist()
-#     else:
-#         assert all(var in df.columns for var in search_var), "Some search variables are not in the dataframe."
-
-#     # Scale the dataframe
-#     X = df[search_var].to_numpy()
-#     X_scaled_array = scaler.fit_transform(X)
-
-#     return X_scaled_array, scaler
-    
-
-# def sampling_block(
-#         X_candidates: np.ndarray, 
-#         X_train: np.ndarray,
-#         y_best: float, 
-#         ml_model: regmodels.MLModel, 
-#         acquisition_params: list[dict],
-#         sampling_mode: str = 'voronoi', 
-#     ) -> tuple[list[int], np.ndarray]:
-
-#     X_candidates_indexes = np.arange(0,len(X_candidates))
-#     sampled_new_idx = []
-#     landscape_list = []
-
-#     X_train_copy = X_train.copy()
-
-#     for acp in acquisition_params:
-
-#         acqui_param = acp.copy()
-#         n_points_per_style = acqui_param['n_points']
-#         percentile = acqui_param.pop('percentile')
-
-#         acqui_func = AcquisitionFunction(y_best=y_best, **acqui_param)
-#         _, landscape = acqui_func.landscape_acquisition(X_candidates=X_candidates, ml_model=ml_model)
-
-#         penalized_landscape = penalize_landscape_fast(
-#             landscape=landscape, 
-#             X_candidates=X_candidates, 
-#             X_train=X_train_copy,
-#             radius=0.25, strength=1.0,
-#         )
-
-#         acq_landscape_ndx = highest_landscape_selection(landscape=penalized_landscape, percentile=percentile)
-#         X_acq_landscape = X_candidates[acq_landscape_ndx]
-#         X_acq_landscape_indexes = X_candidates_indexes[acq_landscape_ndx]
-
-#         sampled_hls_idx = sample_landscape(
-#             X_landscape=X_acq_landscape, 
-#             n_points=n_points_per_style, 
-#             sampling_mode=sampling_mode
-#         )
-
-#         sampled_new_idx += list(X_acq_landscape_indexes[sampled_hls_idx])
-        
-#         landscape_list.append(landscape)
-
-#         X_train_copy = np.concatenate([X_train, X_candidates[sampled_new_idx]])
-
-#     return sampled_new_idx, np.vstack(landscape_list)
-
-
-# def validation_block(gt_df: pd.DataFrame, sampled_df: pd.DataFrame, search_vars: list) -> pd.DataFrame:
-#     # Get target values from ground truth for screened points
-#     merged_df = pd.merge(sampled_df[search_vars], 
-#             gt_df,
-#             on=search_vars,
-#             how='left')
-#     return merged_df.reset_index(drop=True)
 
 def create_insilico_al_experiment_paths(
         exp_name: str,
@@ -247,27 +91,12 @@ def setup_experiment(config: dict) -> Tuple[str, str, int, int, str, str, List[d
 
 # MAIN
 
-DATASET_PATH_NAME = 'dataset'
-
-## Model
-kernel_func = ConstantKernel(1.)*RBF(length_scale=1.) + WhiteKernel(noise_level=0.1)
-gpr_params = {
-    'kernel' : kernel_func,
-    'alpha' : 1e-10,
-    'n_restarts_optimizer' : 150,
-    'optimizer' : 'fmin_l_bfgs_b',
-    'normalize_y' : True,
-    'use_gridsearch' : False,
-    'param_grid' : None,
-    'log_transform' : False,
-}
-ML_MODEL = regmodels.GPR(**gpr_params)
-
-
 if __name__ == '__main__':
 
     from activereg.format import DATASETS_REPO
     from activereg.experiment import sampling_block, validation_block
+
+    DATASET_PATH_NAME = 'dataset'
 
     # Parse the config.yaml
     parser = argparse.ArgumentParser(description="Read a YAML config file.")
@@ -308,8 +137,46 @@ if __name__ == '__main__':
     # Set up the data scaler
     scaler_path = INSILICO_AL_PATH / DATASET_PATH_NAME / 'scaler.pkl'
     pool_df = pd.read_csv(POOL_CSV_PATH)
-    scaler = StandardScaler().fit(pool_df.values)
+
+    data_scaler_type = config.get('data_scaler', None)
+    if data_scaler_type is None:
+        data_scaler_type = "StandardScaler"
+
+    if data_scaler_type == "StandardScaler":
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler().fit(pool_df.values)
+    elif data_scaler_type == "MinMaxScaler":
+        from sklearn.preprocessing import MinMaxScaler
+        scaler = MinMaxScaler().fit(pool_df.values)
+    else:
+        raise ValueError(f"Unknown data scaler type: {data_scaler_type}")
+
     joblib.dump(scaler, scaler_path)
+
+    # Set up the model
+    ml_model_type = config.get('ml_model', None)
+    assert ml_model_type is not None, "ML model type must be specified in the config file."
+
+    if ml_model_type == 'GPR':
+        from activereg.mlmodel import GPR
+        kernel_recipe = config.get('kernel_recipe', "RBF_W")
+        
+        if isinstance(kernel_recipe, str):
+            from activereg.hyperparams import GPR as GPR_dict
+            kernel_recipe = GPR_dict.get(kernel_recipe, None)
+            if kernel_recipe is None:
+                raise ValueError(f"Unknown kernel recipe: {kernel_recipe}")
+
+        elif isinstance(kernel_recipe, list):
+            # Custom kernel recipe
+            from activereg.mlmodel import KernelFactory
+            kernel_factory = KernelFactory(kernel_recipe)
+            kernel_recipe = kernel_factory.get_kernel()
+
+        model_parameters = config.get('model_parameters', {})
+        model_parameters['alpha'] = float(model_parameters['alpha'])
+        ML_MODEL = GPR(kernel=kernel_recipe, **model_parameters)
+
 
     print('# ----------------------------------------------------------------------------\n'\
           f'# \tExperiment: {EXP_NAME} \t\n'\
@@ -357,16 +224,12 @@ if __name__ == '__main__':
         if cycle == 0:
 
             X_candidates = scaler.transform(candidates_df)
-            
-            # # Save scaler to pkl file
-            # scaler_path = Path(EXP_NAME + '/dataset/scaler.pkl')
-            # joblib.dump(scaler, scaler_path)
 
             # Sample initial points from the candidates
             # using the sampling mode defined in the experiment setup
             screened_indexes = sample_landscape(
                 X_landscape=X_candidates, 
-                n_points=N_BATCH,
+                n_points=INIT_BATCH,
                 sampling_mode=INIT_SAMPLING
             )
 
@@ -389,12 +252,6 @@ if __name__ == '__main__':
         # -------------------------------------- #
         # --- INIT of cycle > 0
         if cycle > 0:
-
-            # # Load the scaler if it exists
-            # try:
-            #     scaler = joblib.load(scaler_path)
-            # except FileNotFoundError:
-            #     raise FileNotFoundError(f'Scaler not found at {scaler_path}. Please ensure it exists.')
             
             # Prepare candidates and training data
             candidates_df = candidates_df.reset_index(drop=True)

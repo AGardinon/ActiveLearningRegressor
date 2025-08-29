@@ -11,7 +11,7 @@ from activereg.acquisition import (
 )
 
 
-def setup_data_pool(df: pd.DataFrame, search_var: list[str], scaler: str) -> tuple:
+def setup_data_pool(df: pd.DataFrame, search_var: list[str], scaler: str) -> tuple[np.ndarray, any]:
     """Gets the search space and scales it using StandardScaler.
 
     Args:

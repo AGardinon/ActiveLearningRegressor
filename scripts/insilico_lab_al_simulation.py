@@ -5,9 +5,11 @@ import argparse
 import joblib
 import pandas as pd
 import numpy as np
-from activereg.utils import create_strict_folder
-from activereg.sampling import sample_landscape
+from activereg.format import DATASETS_REPO
 from activereg.utils import save_to_json
+from activereg.sampling import sample_landscape
+from activereg.utils import create_strict_folder
+from activereg.experiment import sampling_block, validation_block, setup_data_pool
 from pathlib import Path
 from typing import List, Tuple
 
@@ -93,9 +95,6 @@ def setup_experiment(config: dict) -> Tuple[str, str, int, int, str, str, List[d
 
 if __name__ == '__main__':
 
-    from activereg.format import DATASETS_REPO
-    from activereg.experiment import sampling_block, validation_block
-
     DATASET_PATH_NAME = 'dataset'
 
     # Parse the config.yaml
@@ -140,21 +139,11 @@ if __name__ == '__main__':
 
     data_scaler_type = config.get('data_scaler', None)
     if data_scaler_type is None:
+        print("Data scaler type not specified in config file. Using StandardScaler as default.")
         data_scaler_type = "StandardScaler"
 
-    if data_scaler_type == "StandardScaler":
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler().fit(pool_df.values)
-    elif data_scaler_type == "MinMaxScaler":
-        from sklearn.preprocessing import MinMaxScaler
-        scaler = MinMaxScaler().fit(pool_df.values)
-    else:
-        raise ValueError(f"Unknown data scaler type: {data_scaler_type}")
-
+    X_pool, scaler = setup_data_pool(df=pool_df, search_var=SEARCH_VAR, scaler=data_scaler_type)
     joblib.dump(scaler, scaler_path)
-
-    # create the X_pool to predict on the whole available pool
-    X_pool = scaler.transform(pool_df)
 
     # Set up the model
     ml_model_type = config.get('ml_model', None)

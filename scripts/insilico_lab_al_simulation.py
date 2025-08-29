@@ -62,7 +62,8 @@ def create_insilico_al_experiment_paths(
     # Pool contains only the search space variables form the ground truth dataframe
     assert all(var in gt_dataframe.columns for var in search_space_variables), \
         f"Search space variables {search_space_variables} not found in ground truth dataframe columns."
-    gt_dataframe[search_space_variables].to_csv(pool_csv_path, index=False)
+    pool_df = gt_dataframe[search_space_variables]
+    pool_df.to_csv(pool_csv_path, index=False)
 
     if evidence_dataframe is not None:
         # If evidence dataframe is provided, save it as the training set
@@ -78,6 +79,12 @@ def create_insilico_al_experiment_paths(
         # Save the candidates and the evidence dataframe to the dataset folder
         candidates_df.to_csv(candidates_csv_path, index=False)
         evidence_dataframe.to_csv(dataset_path / f'{exp_name}_EVIDENCE.csv', index=False)
+    
+    elif evidence_dataframe is None:
+        # If evidence dataframe is not provided, the candidates are
+        # the same as the pool for the first cycle
+        candidates_df = pool_df.copy()
+        candidates_df.to_csv(candidates_csv_path, index=False)
 
     return insilico_al_path, pool_csv_path, candidates_csv_path, train_csv_path
 
@@ -151,7 +158,7 @@ if __name__ == '__main__':
         # candidates are the points not yet sampled.
         if cycle == 0:
             # Load the total pool dataframe
-            candidates_df = pd.read_csv(POOL_CSV_PATH)
+            candidates_df = pd.read_csv(CANDIDATES_CSV_PATH)
 
         elif cycle > 0:
             # Load candidates dataframe
@@ -180,7 +187,7 @@ if __name__ == '__main__':
         # --- INIT of cycle 0
         if cycle == 0:
 
-            X_candidates = scaler.transform(candidates_df)
+            X_candidates = scaler.transform(candidates_df[SEARCH_VAR].to_numpy())
 
             # Sample initial points from the candidates
             # using the sampling mode defined in the experiment setup
@@ -220,7 +227,7 @@ if __name__ == '__main__':
             print(f'Cycle {cycle} - Candidates shape: {X_candidates.shape}, Training shape: {X_train.shape}')
 
             # Compute the best target value from the training set
-            y_best = np.max(y_train)
+            y_best = max(y_train).item()
 
             # Train model on evidence and predict on pool to generate
             # the outputs per cycle
@@ -246,7 +253,7 @@ if __name__ == '__main__':
                 'screened_indexes' : np.array(screened_indexes).astype(int).tolist(),
                 'candidates_df_shape' : candidates_df.shape,
                 'train_df_shape' : train_df.shape,
-                'y_best' : y_best,
+                'y_best' : int(y_best),
                 'nll' : ML_MODEL.model.log_marginal_likelihood().astype(float),
                 'model_params' : ML_MODEL.__repr__()
             }
@@ -295,7 +302,10 @@ if __name__ == '__main__':
         validated_df.to_csv(cycle_output_path / Path(f'cycle_{cycle}_validated.csv'), index=False)
 
         # Merge the new validated data with the existing training data
-        train_df = pd.concat([train_df, validated_df], ignore_index=True)
+        if cycle == 0:
+            train_df = validated_df
+        elif cycle > 0:
+            train_df = pd.concat([train_df, validated_df], ignore_index=True)
         train_df.to_csv(TRAIN_CSV_PATH, index=False)
 
         # Update candidates dataframe removing the sampled points

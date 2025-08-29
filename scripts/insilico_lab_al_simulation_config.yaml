@@ -18,10 +18,9 @@ init_sampling: "fps"
 cycle_sampling: "voronoi"
 
 # ML model configuration (GPR)
-ml_model: "GPR"
-
 # Kernel configuration for GPR
 # either "RBF_W" or "MATERN_W" or custom recipe
+ml_model: "GPR"
 kernel_recipe: "RBF_W"
 
 # Additional paramters

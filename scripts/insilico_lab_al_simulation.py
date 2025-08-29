@@ -1,17 +1,28 @@
-#!
+#############################################################################################
+#
+# Insilico Active Learning Simulation Script
+#
+# This script simulates an active learning experiment in a controlled environment.
+# It allows for the configuration of various parameters and the execution of the experiment.
+#
+#############################################################################################
 
 import yaml
 import argparse
 import joblib
 import pandas as pd
 import numpy as np
-from activereg.format import DATASETS_REPO
+from pathlib import Path
+from typing import List, Tuple
 from activereg.utils import save_to_json
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
-from activereg.experiment import sampling_block, validation_block, setup_data_pool
-from pathlib import Path
-from typing import List, Tuple
+from activereg.experiment import (sampling_block, 
+                                  setup_ml_model, 
+                                  validation_block, 
+                                  setup_data_pool,
+                                  get_gt_dataframes,
+                                  setup_experiment_variables)
 
 # FUNCTIONS
 
@@ -70,33 +81,9 @@ def create_insilico_al_experiment_paths(
 
     return insilico_al_path, pool_csv_path, candidates_csv_path, train_csv_path
 
-
-def setup_experiment(config: dict) -> Tuple[str, str, int, int, str, str, List[dict]]:
-    """Sets up the experiment parameters from the config dictionary.
-
-    Args:
-        config (dict): Configuration dictionary containing experiment parameters.
-
-    Returns:
-        tuple: Contains experiment name, additional notes, number of cycles, initial batch size,
-               initial sampling method, cycle sampling method, and acquisition parameters.
-    """
-    exp_name = config.get('experiment_name', 'Insilico_AL_Simulation')
-    additional_notes = config.get('experiment_notes', '')
-    n_cycles = config.get('n_cycles', 3)
-    init_batch = config.get('init_batch_size', 8)
-    init_sampling = config.get('init_sampling', 'fps')
-    cycle_sampling = config.get('cycle_sampling', 'voronoi')
-    acquisition_params = config.get('acquisition_parameters', [])
-
-    return (exp_name, additional_notes, n_cycles, init_batch, init_sampling, cycle_sampling, acquisition_params)
-
 # MAIN
 
 if __name__ == '__main__':
-
-    DATASET_PATH_NAME = 'dataset'
-
     # Parse the config.yaml
     parser = argparse.ArgumentParser(description="Read a YAML config file.")
     parser.add_argument("-c", "--config", required=True, help="Path to the YAML configuration file")
@@ -105,26 +92,26 @@ if __name__ == '__main__':
     with open(args.config, "r") as file:
         config = yaml.safe_load(file)
 
-    # Extracting parameters from the config file
-    (EXP_NAME, ADDITIONAL_NOTES, N_CYCLES, INIT_BATCH, INIT_SAMPLING, CYCLE_SAMPLING, ACQUI_PARAMS) = setup_experiment(config)
+    DATASET_PATH_NAME = 'dataset'
 
-    # Setting parameters for the experiment
+    # Extracting parameters from the config file &
+    # setting the parameters for the experiment
+    (EXP_NAME, 
+     ADDITIONAL_NOTES, 
+     N_CYCLES, 
+     INIT_BATCH, 
+     INIT_SAMPLING, 
+     CYCLE_SAMPLING, 
+     ACQUI_PARAMS,
+     SEARCH_VAR,
+     TARGET_VAR) = setup_experiment_variables(config)
+    
     N_BATCH = sum(acp['n_points'] for acp in ACQUI_PARAMS)
-    SEARCH_VAR = config.get('search_space_variables', [])
-    TARGET_VAR = config.get('target_variables', 'target')
+
+    # Get ground truth and evidence dataframes
+    gt_df, evidence_df = get_gt_dataframes(config)
 
     # Paths for the experiment
-    gt_df_name = config.get('ground_truth_file', None)
-    if gt_df_name is None:
-        raise ValueError("Ground truth dataframe name must be provided in the config file.")
-    gt_df = pd.read_csv(DATASETS_REPO / gt_df_name)
-
-    exp_evidence_df_name = config.get('experiment_evidence', None)
-    if exp_evidence_df_name is not None:
-        evidence_df = pd.read_csv(DATASETS_REPO / exp_evidence_df_name)
-    else:
-        evidence_df = None
-
     INSILICO_AL_PATH, POOL_CSV_PATH, CANDIDATES_CSV_PATH, TRAIN_CSV_PATH = create_insilico_al_experiment_paths(
         exp_name=EXP_NAME,
         gt_dataframe=gt_df,
@@ -146,29 +133,7 @@ if __name__ == '__main__':
     joblib.dump(scaler, scaler_path)
 
     # Set up the model
-    ml_model_type = config.get('ml_model', None)
-    assert ml_model_type is not None, "ML model type must be specified in the config file."
-
-    if ml_model_type == 'GPR':
-        from activereg.mlmodel import GPR
-        kernel_recipe = config.get('kernel_recipe', "RBF_W")
-        
-        if isinstance(kernel_recipe, str):
-            from activereg.hyperparams import GPR as GPR_dict
-            kernel_recipe = GPR_dict.get(kernel_recipe, None)
-            if kernel_recipe is None:
-                raise ValueError(f"Unknown kernel recipe: {kernel_recipe}")
-
-        elif isinstance(kernel_recipe, list):
-            # Custom kernel recipe
-            from activereg.mlmodel import KernelFactory
-            kernel_factory = KernelFactory(kernel_recipe)
-            kernel_recipe = kernel_factory.get_kernel()
-
-        model_parameters = config.get('model_parameters', {})
-        model_parameters['alpha'] = float(model_parameters['alpha'])
-        ML_MODEL = GPR(kernel=kernel_recipe, **model_parameters)
-
+    ML_MODEL = setup_ml_model(config)
 
     print('# ----------------------------------------------------------------------------\n'\
           f'# \tExperiment: {EXP_NAME} \t\n'\

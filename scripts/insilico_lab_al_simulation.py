@@ -153,6 +153,9 @@ if __name__ == '__main__':
 
     joblib.dump(scaler, scaler_path)
 
+    # create the X_pool to predict on the whole available pool
+    X_pool = scaler.transform(pool_df)
+
     # Set up the model
     ml_model_type = config.get('ml_model', None)
     assert ml_model_type is not None, "ML model type must be specified in the config file."
@@ -265,11 +268,12 @@ if __name__ == '__main__':
             # Compute the best target value from the training set
             y_best = np.max(y_train)
 
-            # Train model on evidence and predict on candidates
+            # Train model on evidence and predict on pool to generate
+            # the outputs per cycle
             ML_MODEL.train(X_train, y_train)
-            _, y_pred, y_unc = ML_MODEL.predict(X_candidates)
+            _, y_pred, y_unc = ML_MODEL.predict(X_pool)
 
-            # Sample new points based on the acquisition function
+            # Sample new points from candidates based on the acquisition function
             screened_indexes, landscape = sampling_block(
                 X_candidates=X_candidates, 
                 X_train=X_train,
@@ -301,16 +305,20 @@ if __name__ == '__main__':
             # Save the landscape and predictions &
             # Add landscapes as columns with acquisition parameter names
             model_predictions_df = pd.DataFrame({
-                **{col: candidates_df[col] for col in SEARCH_VAR},
+                **{col: pool_df[col] for col in SEARCH_VAR},
                 'y_pred': y_pred,
                 'y_uncertainty': y_unc
             })
-            
+
+            model_landscapes_df = pd.DataFrame({
+                **{col: candidates_df[col] for col in SEARCH_VAR}
+            })
             for i, acqui_param in enumerate(ACQUI_PARAMS):
                 col_name = f"landscape_{acqui_param['acquisition_mode']}"
-                model_predictions_df[col_name] = landscape[i]
+                model_landscapes_df[col_name] = landscape[i]
 
             model_predictions_df.to_csv(cycle_output_path / Path(f'cycle_{cycle}_predictions.csv'), index=False)
+            model_landscapes_df.to_csv(cycle_output_path / Path(f'cycle_{cycle}_landscapes.csv'), index=False)
 
             train_df.to_csv(cycle_output_path / Path(f'X_train_cycle_{cycle}.csv'), index=False)
 

@@ -1,6 +1,7 @@
 #!
 
 import json
+import shutil
 import numpy as np
 from datetime import datetime
 from scipy.stats import norm
@@ -144,13 +145,20 @@ def sinusoidal_landscape(X: np.ndarray, noise_level: float=0.1) -> np.ndarray:
 
 # FOLDERS & FILES
 
-def create_strict_folder(path_str: str) -> None:
+def create_strict_folder(path_str: str, overwrite: bool = False) -> None:
     """
-    Create a folder from a path string, no owerwrite.
+    Create a folder from a path string, with optional overwrite.
+    
+    Args:
+        path_str: str - Path to the folder to create
+        overwrite: bool - If True, allows overwriting existing folder (default: False)
     """
     path = Path(path_str)
     if path.exists():
-        raise FileExistsError(f"Directory '{path}' already exists.")
+        if overwrite:
+            shutil.rmtree(path)
+        else:
+            raise FileExistsError(f"Directory '{path}' already exists.")
     path.mkdir(parents=True)
 
 

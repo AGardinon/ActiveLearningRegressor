@@ -3,6 +3,8 @@
 import numpy as np
 import pandas as pd
 import activereg.mlmodel as regmodels
+from sklearn.base import BaseEstimator
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from activereg.format import DATASETS_REPO
 from activereg.sampling import sample_landscape
 from activereg.hyperparams import get_gp_kernel
@@ -36,37 +38,38 @@ def get_gt_dataframes(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     return gt_df, evidence_df
 
 
-def setup_data_pool(df: pd.DataFrame, search_var: list[str], scaler: str) -> tuple[np.ndarray, any]:
-    """Gets the search space and scales it using StandardScaler.
+def setup_data_pool(df: pd.DataFrame, search_var: list[str], scaler: str) -> tuple[np.ndarray, BaseEstimator]:
+    """Gets the search space and scales it using StandardScaler or MinMaxScaler.
 
     Args:
         df (pd.DataFrame): pool dataframe.
         search_var (list[str]): list of search variable names.
+        scaler (str): type of scaler to use ('StandardScaler' or 'MinMaxScaler')
 
     Returns:
-        df_scaled_array, scaler (np.ndarray, Any): scaled search space as a numpy array and the scaler used.
+        tuple[np.ndarray, BaseEstimator]: scaled search space as a numpy array and the scaler instance
     """
-    if scaler == 'StandardScaler':
-        from sklearn.preprocessing import StandardScaler
-    elif scaler == 'MinMaxScaler':
-        from sklearn.preprocessing import MinMaxScaler
-    else:
-        raise ValueError(f"Scaler {scaler} is not supported. Use 'StandardScaler' or 'MinMaxScaler'.")
-
-    scaler = StandardScaler() if scaler == 'StandardScaler' else MinMaxScaler()
+    scaler_classes = {
+        'StandardScaler': StandardScaler,
+        'MinMaxScaler': MinMaxScaler
+    }
+    
+    ScalerClass = scaler_classes.get(scaler)
+    if ScalerClass is None:
+        raise ValueError(f"Scaler {scaler} is not supported. Use {', '.join(scaler_classes.keys())}.")
 
     df = df.copy()
-
-    if search_var is None:
-        search_var = df.columns.tolist()
-    else:
-        assert all(var in df.columns for var in search_var), "Some search variables are not in the dataframe."
+    search_var = search_var or df.columns.tolist()
+    
+    if not all(var in df.columns for var in search_var):
+        raise ValueError("Some search variables are not in the dataframe.")
 
     # Scale the dataframe
     X = df[search_var].to_numpy()
-    X_scaled_array = scaler.fit_transform(X)
+    scaler_instance = ScalerClass()
+    X_scaled_array = scaler_instance.fit_transform(X)
 
-    return X_scaled_array, scaler
+    return X_scaled_array, scaler_instance
 
 
 def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, str, list[dict]]:

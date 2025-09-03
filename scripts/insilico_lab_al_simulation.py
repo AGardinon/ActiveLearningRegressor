@@ -22,13 +22,14 @@ from activereg.experiment import (sampling_block,
                                   validation_block, 
                                   setup_data_pool,
                                   get_gt_dataframes,
+                                  remove_evidence_from_gt,
                                   setup_experiment_variables)
 
 # FUNCTIONS
 
 def create_insilico_al_experiment_paths(
         exp_name: str,
-        gt_dataframe: pd.DataFrame,
+        pool_dataframe: pd.DataFrame,
         search_space_variables: List[str],
         evidence_dataframe: pd.DataFrame = None,
         dataset_path_name: str = 'dataset',
@@ -37,7 +38,7 @@ def create_insilico_al_experiment_paths(
 
     Args:
         exp_name (str): experiment name.
-        gt_dataframe (pd.DataFrame): ground truth dataframe.
+        pool_dataframe (pd.DataFrame): ground truth dataframe.
         search_space_variables (List[str]): search space variables.
         evidence_dataframe (pd.DataFrame, optional): starting evidence dataframe. Defaults to None.
 
@@ -60,31 +61,16 @@ def create_insilico_al_experiment_paths(
     train_csv_path = dataset_path / f'{exp_name}_TRAIN.csv'
 
     # Pool contains only the search space variables form the ground truth dataframe
-    assert all(var in gt_dataframe.columns for var in search_space_variables), \
+    assert all(var in pool_dataframe.columns for var in search_space_variables), \
         f"Search space variables {search_space_variables} not found in ground truth dataframe columns."
-    pool_df = gt_dataframe[search_space_variables]
+    pool_df = pool_dataframe[search_space_variables]
     pool_df.to_csv(pool_csv_path, index=False)
 
+    candidates_df = remove_evidence_from_gt(pool_df, evidence_df, search_space_variables)
+    candidates_df.to_csv(candidates_csv_path, index=False)
+
     if evidence_dataframe is not None:
-        # If evidence dataframe is provided, save it as the training set
-        assert all(var in evidence_dataframe.columns for var in search_space_variables), \
-            f"Search space variables {search_space_variables} not found in evidence dataframe columns."
-        assert all(var in evidence_dataframe.columns for var in gt_dataframe.columns), \
-            f"Ground truth variables {gt_dataframe.columns.tolist()} not found in evidence dataframe columns."
-
-        # Remove evidence points from the ground truth dataframe
-        evidence_set = set(evidence_dataframe[search_space_variables].apply(tuple, axis=1))
-        candidates_df = gt_dataframe[~gt_dataframe[search_space_variables].apply(tuple, axis=1).isin(evidence_set)]
-
-        # Save the candidates and the evidence dataframe to the dataset folder
-        candidates_df.to_csv(candidates_csv_path, index=False)
         evidence_dataframe.to_csv(dataset_path / f'{exp_name}_EVIDENCE.csv', index=False)
-    
-    elif evidence_dataframe is None:
-        # If evidence dataframe is not provided, the candidates are
-        # the same as the pool for the first cycle
-        candidates_df = pool_df.copy()
-        candidates_df.to_csv(candidates_csv_path, index=False)
 
     return insilico_al_path, pool_csv_path, candidates_csv_path, train_csv_path
 
@@ -121,14 +107,14 @@ if __name__ == '__main__':
     # Paths for the experiment
     INSILICO_AL_PATH, POOL_CSV_PATH, CANDIDATES_CSV_PATH, TRAIN_CSV_PATH = create_insilico_al_experiment_paths(
         exp_name=EXP_NAME,
-        gt_dataframe=gt_df,
+        pool_dataframe=gt_df,
         search_space_variables=SEARCH_VAR,
         evidence_dataframe=evidence_df,
         dataset_path_name=DATASET_PATH_NAME
     )
 
     # Set up the data scaler
-    scaler_path = INSILICO_AL_PATH / DATASET_PATH_NAME / 'scaler.pkl'
+    scaler_path = INSILICO_AL_PATH / DATASET_PATH_NAME / 'scaler.joblib'
     pool_df = pd.read_csv(POOL_CSV_PATH)
 
     data_scaler_type = config.get('data_scaler', None)

@@ -72,6 +72,26 @@ def setup_data_pool(df: pd.DataFrame, search_var: list[str], scaler: str) -> tup
     return X_scaled_array, scaler_instance
 
 
+def remove_evidence_from_gt(gt: pd.DataFrame, evidence: pd.DataFrame, search_vars: list[str]) -> pd.DataFrame:
+    if evidence is not None:
+        # If evidence dataframe is provided, save it as the training set
+        assert all(var in evidence.columns for var in search_vars), \
+            f"Search space variables {search_vars} not found in evidence dataframe columns."
+        assert all(var in evidence.columns for var in gt.columns), \
+            f"Ground truth variables {gt.columns.tolist()} not found in evidence dataframe columns."
+
+        # Remove evidence points from the ground truth dataframe
+        evidence_set = set(evidence[search_vars].apply(tuple, axis=1))
+        candidates_df = gt[~gt[search_vars].apply(tuple, axis=1).isin(evidence_set)]
+
+    elif evidence is None:
+        # If evidence dataframe is not provided, the candidates are
+        # the same as the gt for the first cycle
+        candidates_df = gt.copy()
+
+    return candidates_df
+
+
 def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, str, list[dict]]:
     """Sets up the experiment parameters from the config dictionary.
 
@@ -179,7 +199,6 @@ def sampling_block(
 
     # loop over acquisition function types
     for acp in acquisition_params:
-
         acqui_param = acp.copy()
         n_points_per_style = acqui_param['n_points']
         percentile = acqui_param.pop('percentile')

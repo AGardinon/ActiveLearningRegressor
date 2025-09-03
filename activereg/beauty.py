@@ -11,36 +11,30 @@ from activereg.utils import create_experiment_name
 # ---------------------------------------------------------------------------
 # --- PLOT FUNC
 
-def plot_predicted_landscape(X_pool: np.ndarray, pred_array: np.ndarray, save_path: Path=None) -> None:
+def plot_predicted_landscape(X_pool: np.ndarray, pred_array: np.ndarray):
     """Plot the predicted landscape.
 
     Args:
         X_pool (np.ndarray): The input features for the pool.
-        pred_array (np.ndarray): The predicted values.
+        pred_array (np.ndarray): The predicted values, must be 2D (N_cycles, N_samples).
         save_path (Path, optional): The path to save the plot. Defaults to None.
     """
-    # check if pred_array is a 3d tensor if not add dummy dimension
-    if pred_array.ndim == 2:
-        pred_array = np.expand_dims(pred_array, axis=0)
+    # Check if the pred_array is 2D
 
-    reps, cycles, _ = pred_array.shape
+    cycles, _ = pred_array.shape
+    fig, ax = get_axes(cycles, 4)
 
-    for rep in range(reps):
-        rep_predictions = pred_array[rep]
-        fig, ax = get_axes(cycles, 4)
-
-        for i,pred in enumerate(rep_predictions):
-            sc = ax[i].scatter(
-                *X_pool.T, c=pred, cmap='coolwarm', s=5
-            )
-            ax[i].set_title(f'Cycle {i+1}')
-            _ = fig.colorbar(sc, ax=ax[i])
-            ax[i].set_aspect('equal')
-
+    for i,pred in enumerate(pred_array):
+        sc = ax[i].scatter(
+            *X_pool.T, c=pred, cmap='coolwarm', s=5
+        )
+        ax[i].set_title(f'Cycle {i+1}')
+        _ = fig.colorbar(sc, ax=ax[i])
+        ax[i].set_aspect('equal')
         fig.tight_layout()
-        if save_path:
-            fig.savefig(save_path / f'predicted_landscape_rep{rep+1}.png')
-        plt.close(fig)
+
+    return fig, ax
+
 
 # ---------------------------------------------------------------------------
 # --- PLOT UTILITIES

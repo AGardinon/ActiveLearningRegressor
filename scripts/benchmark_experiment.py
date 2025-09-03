@@ -14,11 +14,11 @@ import argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from activereg import beauty
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
 from activereg.experiment import (get_gt_dataframes, 
                                   sampling_block, 
-                                  validation_block, 
                                   setup_data_pool,
                                   setup_ml_model,
                                   remove_evidence_from_gt,
@@ -51,7 +51,6 @@ def create_benchmark_path(
     pool_df.to_csv(pool_csv_path, index=False)
 
     return benchmark_path, pool_csv_path, pool_df
-
 
 # MAIN
 
@@ -107,26 +106,6 @@ if __name__ == '__main__':
     # candidates_df -> unscreened space
     candidates_df = remove_evidence_from_gt(gt_df, evidence_df, search_vars=SEARCH_VAR)
 
-    # Set up candidates and train sets
-    X_candidates = scaler.transform(candidates_df[SEARCH_VAR].to_numpy())
-    y_candidates = candidates_df[TARGET_VAR].to_numpy()
-
-    if evidence_df is not None:
-        X_train = scaler.transform(evidence_df[SEARCH_VAR].to_numpy())
-        y_train = evidence_df[TARGET_VAR].to_numpy()
-
-    elif evidence_df is None:
-        screened_indexes = sample_landscape(
-            X_landscape=X_candidates,
-            n_points=INIT_BATCH,
-            sampling_mode=INIT_SAMPLING
-        )
-        X_train = X_candidates[screened_indexes]
-        y_train = y_candidates[screened_indexes]
-
-        X_candidates = np.delete(X_candidates, screened_indexes, axis=0)
-        y_candidates = np.delete(y_candidates, screened_indexes, axis=0)
-
     # Set up the model
     ML_MODEL = setup_ml_model(config)
 
@@ -134,8 +113,29 @@ if __name__ == '__main__':
     # RUN THE BENCHMARK EXPERIMENT
 
     benchmark_data = []
+    pred_landscape_array = np.full((N_REPS, N_CYCLES, X_pool.shape[0]), np.nan)
 
     for rep in range(N_REPS):
+
+        # Set up candidates and train sets
+        X_candidates = scaler.transform(candidates_df[SEARCH_VAR].to_numpy())
+        y_candidates = candidates_df[TARGET_VAR].to_numpy()
+
+        if evidence_df is not None:
+            X_train = scaler.transform(evidence_df[SEARCH_VAR].to_numpy())
+            y_train = evidence_df[TARGET_VAR].to_numpy()
+
+        elif evidence_df is None:
+            screened_indexes = sample_landscape(
+                X_landscape=X_candidates,
+                n_points=INIT_BATCH,
+                sampling_mode=INIT_SAMPLING
+            )
+            X_train = X_candidates[screened_indexes]
+            y_train = y_candidates[screened_indexes]
+
+            X_candidates = np.delete(X_candidates, screened_indexes, axis=0)
+            y_candidates = np.delete(y_candidates, screened_indexes, axis=0)
 
         for cycle in range(N_CYCLES):
 
@@ -167,8 +167,19 @@ if __name__ == '__main__':
                 "model_params": ML_MODEL.__repr__()
             })
 
+            pred_landscape_array[rep, cycle] = y_pred
+
+            # Update the train and candidates sets
+            X_train = np.vstack((X_train, X_candidates[sampled_indexes]))
+            y_train = np.concatenate((y_train, y_candidates[sampled_indexes]))
+
+            X_candidates = np.delete(X_candidates, sampled_indexes, axis=0)
+            y_candidates = np.delete(y_candidates, sampled_indexes, axis=0)
 
 
     # Save benchmark data to CSV
     benchmark_df = pd.DataFrame(benchmark_data)
     benchmark_df.to_csv(BENCHMARK_PATH / 'benchmark_data.csv', index=False)
+
+    np.save(BENCHMARK_PATH / 'predicted_landscape.npy', pred_landscape_array)
+    beauty.plot_predicted_landscape(X_pool, pred_landscape_array, BENCHMARK_PATH)

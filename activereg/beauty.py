@@ -11,150 +11,36 @@ from activereg.utils import create_experiment_name
 # ---------------------------------------------------------------------------
 # --- PLOT FUNC
 
-def plot2D_surfaceplot(
-        df: pd.DataFrame,
-        pdf: np.ndarray,
-        var1: str,
-        var2: str,
-        levels: int|list,
-        cmap: str,
-        contours_dict: dict,
-        axis,
-        surface_edges: float=0.,
-    ) -> None:
-    
-    X = df[var1]
-    Y = df[var2]
+def plot_predicted_landscape(X_pool: np.ndarray, pred_array: np.ndarray, save_path: Path=None) -> None:
+    """Plot the predicted landscape.
 
-    # Determine the range for X and Y
-    x_min, x_max = X.min()-surface_edges, X.max()+surface_edges
-    y_min, y_max = Y.min()-surface_edges, Y.max()+surface_edges
-
-    Z = pdf
-
-    # Generate a grid and interpolate the diffusion coefficients
-    bins=100j
-    grid_x, grid_y = np.mgrid[x_min:x_max:bins, y_min:y_max:bins]
-    grid_z = griddata((X, Y), Z, (grid_x, grid_y), method='linear')
-    grid_z = np.round(grid_z, decimals=4)
-
-    contours = axis.contour(
-        grid_x, grid_y, grid_z,
-        levels=levels, colors='.0')
-    axis.clabel(contours, inline=True, **contours_dict)
-
-    contours = axis.contourf(
-        grid_x, grid_y, grid_z, 
-        levels=levels, cmap=cmap)
-
-    axis.set_xlabel(var1)
-    axis.set_ylabel(var2)
-
-
-def plot_2Dcycle(train_set, next_set, pool_set, pred_set, landscape_set, name_set, show=False):
-    fig, ax = get_axes(3,3)
-
-    X,y,cmap = pool_set
-    Xc,yp = pred_set
-    Xt,yt = train_set
-    Xn,yn = next_set
-    landsc,hls,cmapl = landscape_set
-
-    ax[0].scatter(*Xc.T,c=yp,s=5,cmap=cmap,vmin=min(y),vmax=max(y))
-    ax[0].scatter(*Xt.T,c=yt,s=30,cmap=cmap,vmin=min(y),vmax=max(y),marker='o',edgecolor='black',zorder=3)
-    ax[0].scatter(*Xn.T,c=yn,s=30,marker='*',edgecolor='black',zorder=3)
-
-    ax[1].scatter(*Xc.T,c=landsc,s=5,cmap=cmapl,vmin=min(landsc),vmax=max(landsc))
-    ax[1].scatter(*hls.T,c='.5',s=5,alpha=.3)
-    ax[1].scatter(*Xt.T,s=30,c='0.',marker='o',edgecolor='black',zorder=3)
-    ax[1].scatter(*Xn.T,s=30,c='0.',marker='*',edgecolor='black',zorder=3)
-
-    ax[2].scatter(*X.T,c=y,s=5,cmap=cmap,vmin=min(y),vmax=max(y))
-    ax[2].scatter(*Xt.T,c=yt,s=30,cmap=cmap,vmin=min(y),vmax=max(y),marker='o',edgecolor='black',zorder=3)
-
-    fig.tight_layout()
-    out_dir = name_set[0]
-    fig_name = create_experiment_name(name_set=name_set[1:])
-    fig.savefig(out_dir / Path(fig_name+'.png'))
-    if show:
-        plt.show()
-
-    return fig, ax
-
-
-def add_table_to_plot(ax, data_dict, title="Model Information", 
-                      table_position='upper right', fontsize=9, 
-                      cell_facecolor="#ffffff", cell_alpha=0.8,
-                      cellLoc='left'):
+    Args:
+        X_pool (np.ndarray): The input features for the pool.
+        pred_array (np.ndarray): The predicted values.
+        save_path (Path, optional): The path to save the plot. Defaults to None.
     """
-    Add a formatted table to a matplotlib axes object.
-    
-    Parameters:
-    -----------
-    ax : matplotlib.axes.Axes
-        The axes object to add the table to
-    data_dict : dict
-        Dictionary of dictionaries containing the data to display
-    title : str, optional
-        Title for the table (not displayed visually)
-    table_position : str, optional
-        Position of the table ('upper right', 'upper left', etc.)
-    fontsize : int, optional
-        Font size for table text
-    cell_facecolor : str, optional
-        Background color of the cells
-    cell_alpha : float, optional
-        Transparency of the background color
-    cellLoc : str, optional
-        Cell alignment ('left', 'center', 'right')
-    
-    Returns:
-    --------
-    table : matplotlib.table.Table
-        The created table object
-    """
-    
-    # Flatten the nested dictionary into a list of rows
-    table_data = []
-    for section, values in data_dict.items():
-        table_data.append([f"{section}:", ""])
-        for key, value in values.items():
-            if isinstance(value, float):
-                if abs(value) < 1e-3 or abs(value) > 1e3:
-                    formatted_value = f"{value:.2e}"
-                else:
-                    formatted_value = f"{value:.2f}"
-            else:
-                formatted_value = str(value)
-            table_data.append([f"  {key}", formatted_value])
-        if section != list(data_dict.keys())[-1]:
-            table_data.append(["", ""])
+    # check if pred_array is a 3d tensor if not add dummy dimension
+    if pred_array.ndim == 2:
+        pred_array = np.expand_dims(pred_array, axis=0)
 
-    # Create the table
-    table = ax.table(cellText=table_data,
-                     colLabels=None,
-                     loc=table_position,
-                     cellLoc=cellLoc)
+    reps, cycles, _ = pred_array.shape
 
-    # Table styling
-    table.auto_set_font_size(False)
-    table.set_fontsize(fontsize)
-    table.scale(1, 1.3)
+    for rep in range(reps):
+        rep_predictions = pred_array[rep]
+        fig, ax = get_axes(cycles, 4)
 
-    # Style section headers
-    for i, row in enumerate(table_data):
-        is_header = row[0].endswith(':') and not row[0].startswith('  ')
-        for j in range(2):
-            cell = table[i, j]
-            if is_header:
-                cell.set_text_props(weight='bold')
-                cell.set_facecolor('#f0f0f0')
-            else:
-                cell.set_facecolor(cell_facecolor)
-            cell.set_alpha(cell_alpha)
-            cell.set_linewidth(0)
+        for i,pred in enumerate(rep_predictions):
+            sc = ax[i].scatter(
+                *X_pool.T, c=pred, cmap='coolwarm', s=5
+            )
+            ax[i].set_title(f'Cycle {i+1}')
+            _ = fig.colorbar(sc, ax=ax[i])
+            ax[i].set_aspect('equal')
 
-    return table
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path / f'predicted_landscape_rep{rep+1}.png')
+        plt.close(fig)
 
 # ---------------------------------------------------------------------------
 # --- PLOT UTILITIES

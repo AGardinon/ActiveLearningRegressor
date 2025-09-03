@@ -12,7 +12,7 @@ target_variables:
 
 # Cycles parameters
 init_batch_size: 8
-n_cycles: 10
+n_cycles: 6
 
 init_sampling: "fps"
 cycle_sampling: "voronoi"

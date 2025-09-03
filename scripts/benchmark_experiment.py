@@ -13,6 +13,7 @@ import joblib
 import argparse
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from pathlib import Path
 from activereg import beauty
 from activereg.sampling import sample_landscape
@@ -113,7 +114,20 @@ if __name__ == '__main__':
     # RUN THE BENCHMARK EXPERIMENT
 
     benchmark_data = []
+    train_points_data = []
     pred_landscape_array = np.full((N_REPS, N_CYCLES, X_pool.shape[0]), np.nan)
+
+    # Get the acquisition mode per N_batch point that will be acquired
+    predefined_acquisition_modes = []
+    print("Predefined acquisition modes:")
+    for acp in ACQUI_PARAMS:
+        predefined_acquisition_modes.extend([acp['acquisition_mode']] * acp['n_points'])
+        print(f" - {acp['n_points']} points with {acp['acquisition_mode']} acquisition")
+    '''
+    TODO: set up a acquisition scheduler that can handle how many points to acquire at each cycle
+    following some rules in the config, eg, for the first 3 cycle only exploration and then mixed
+    -> understanding how to do this
+    '''
 
     for rep in range(N_REPS):
 
@@ -136,6 +150,16 @@ if __name__ == '__main__':
 
             X_candidates = np.delete(X_candidates, screened_indexes, axis=0)
             y_candidates = np.delete(y_candidates, screened_indexes, axis=0)
+        
+        # Add initial training points to tracking
+        for i in range(len(X_train)):
+            train_points_data.append({
+            **{col : X_train[i,j] for j,col in enumerate(SEARCH_VAR)},
+            "cycle": 0,
+            "repetition": rep+1,
+            "acquisition_source": INIT_SAMPLING if evidence_df is None else "evidence",
+            "y_value": y_train[i][0]
+            })
 
         for cycle in range(N_CYCLES):
 
@@ -173,6 +197,16 @@ if __name__ == '__main__':
             X_train = np.vstack((X_train, X_candidates[sampled_indexes]))
             y_train = np.concatenate((y_train, y_candidates[sampled_indexes]))
 
+            # Update training points tracking
+            for i in range(len(X_candidates[sampled_indexes])):
+                train_points_data.append({
+                    **{col : X_candidates[sampled_indexes][i,j] for j,col in enumerate(SEARCH_VAR)},
+                    "cycle": cycle+1,
+                    "repetition": rep+1,
+                    "acquisition_source": predefined_acquisition_modes[i],
+                    "y_value": y_candidates[sampled_indexes][i][0]
+                })
+
             X_candidates = np.delete(X_candidates, sampled_indexes, axis=0)
             y_candidates = np.delete(y_candidates, sampled_indexes, axis=0)
 
@@ -181,5 +215,47 @@ if __name__ == '__main__':
     benchmark_df = pd.DataFrame(benchmark_data)
     benchmark_df.to_csv(BENCHMARK_PATH / 'benchmark_data.csv', index=False)
 
+    train_points_df = pd.DataFrame(train_points_data)
+    train_points_df.to_csv(BENCHMARK_PATH / 'train_points_data.csv', index=False)
+
     np.save(BENCHMARK_PATH / 'predicted_landscape.npy', pred_landscape_array)
-    beauty.plot_predicted_landscape(X_pool, pred_landscape_array, BENCHMARK_PATH)
+
+
+    # PLOTS
+
+    acquisition_markers_dict = {
+        'fps': {'marker': '*', 'color': 'black', 's': 30},
+        'random': {'marker': '*', 'color': 'black', 's': 30},
+        'voronoi': {'marker': '*', 'color': 'black', 's': 30},
+        'exploration_mutual_info': {'marker': '^', 'color': 'white', 's': 20},
+        'expected_improvement': {'marker': 'o', 'color': 'yellow', 's': 20},
+        'target_expected_improvement': {'marker': 'D', 'color': 'orange', 's': 20}
+    }
+
+    for rep in range(N_REPS):
+
+        rep_train_data = train_points_df[train_points_df['repetition'] == rep + 1]
+
+        fig, ax = beauty.plot_predicted_landscape(X_pool, pred_landscape_array[rep])
+
+        # plot train points having a different marker based on the predefined acquisition modes
+        for i in range(len(ax)):
+            if i < N_CYCLES:
+
+                cycle_train_data = rep_train_data[rep_train_data['cycle'] <= i]
+                acquisition_modes = cycle_train_data['acquisition_source'].values
+
+                for acqui_mode in acquisition_modes:
+
+                    acqui_data = cycle_train_data[cycle_train_data['acquisition_source'] == acqui_mode]
+
+                    ax[i].scatter(
+                        acqui_data[SEARCH_VAR[0]],
+                        acqui_data[SEARCH_VAR[1]],
+                        **acquisition_markers_dict.get(acqui_mode, {'marker': 'x', 'color': 'grey', 's': 20}),
+                        edgecolor='black'
+                    )
+
+        fig.savefig(BENCHMARK_PATH / f'predicted_landscape_rep{rep+1}.png')
+        plt.close(fig)
+

@@ -15,9 +15,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
+from scipy.interpolate import griddata
+from sklearn.metrics import mean_squared_error
 from activereg import beauty
 from activereg.sampling import sample_landscape
-from activereg.utils import create_strict_folder
+from activereg.utils import create_strict_folder, jsd_histogram, jsd_kde
 from activereg.experiment import (get_gt_dataframes, 
                                   sampling_block, 
                                   setup_data_pool,
@@ -93,6 +95,11 @@ if __name__ == '__main__':
         overwrite=True,
     )
 
+    # Save a copy of the config file in the benchmark folder
+    config_save_path = BENCHMARK_PATH / 'config.yaml'
+    with open(config_save_path, 'w') as file:
+        yaml.dump(config, file)
+
     # Set up the data scaler on the complete search space
     data_scaler_type = config.get('data_scaler', None)
     if data_scaler_type is None:
@@ -116,6 +123,7 @@ if __name__ == '__main__':
     benchmark_data = []
     train_points_data = []
     pred_landscape_array = np.full((N_REPS, N_CYCLES, X_pool.shape[0]), np.nan)
+    unc_landscape_array = np.full((N_REPS, N_CYCLES, X_pool.shape[0]), np.nan)
 
     # Get the acquisition mode per N_batch point that will be acquired
     predefined_acquisition_modes = []
@@ -179,7 +187,10 @@ if __name__ == '__main__':
                 ml_model=ML_MODEL,
                 acquisition_params=ACQUI_PARAMS,
                 sampling_mode=CYCLE_SAMPLING,
-                penlanscape_params=(0.25, 1.0)
+                # Hard penalization: (0.25, 1.0) (radius, strength)
+                # Soft penalization: (0.25, 0.5) (radius, strength)
+                # Weak penalization: (0.25, 0.1) (radius, strength)
+                penalization_params=(0.25, 0.5)
             )
 
             benchmark_data.append({
@@ -192,6 +203,7 @@ if __name__ == '__main__':
             })
 
             pred_landscape_array[rep, cycle] = y_pred
+            unc_landscape_array[rep, cycle] = y_unc
 
             # Update the train and candidates sets
             X_train = np.vstack((X_train, X_candidates[sampled_indexes]))
@@ -219,6 +231,7 @@ if __name__ == '__main__':
     train_points_df.to_csv(BENCHMARK_PATH / 'train_points_data.csv', index=False)
 
     np.save(BENCHMARK_PATH / 'predicted_landscape.npy', pred_landscape_array)
+    np.save(BENCHMARK_PATH / 'uncertainty_landscape.npy', unc_landscape_array)
 
 
     # PLOTS
@@ -232,11 +245,57 @@ if __name__ == '__main__':
         'target_expected_improvement': {'marker': 'D', 'color': 'orange', 's': 20}
     }
 
+    rmse_per_rep = []
+    jsd_per_rep = []
+
     for rep in range(N_REPS):
 
-        rep_train_data = train_points_df[train_points_df['repetition'] == rep + 1]
+        # -------------------------------------------------------------------------------------------------------------
+        # 1. Highlight target_expected_improvement points
+        # if "target_expected_improvement" is in the acquisition modes,
+        # plot hilight of the points in the plane that have value = target
+        tei_dict = next((acp for acp in ACQUI_PARAMS if acp['acquisition_mode'] == 'target_expected_improvement'), None)
+        if tei_dict is not None:
 
-        fig, ax = beauty.plot_predicted_landscape(X_pool, pred_landscape_array[rep])
+            target_value = tei_dict.get('y_target', None)
+            target_epsilon = tei_dict.get('epsilon', 50)
+            assert target_value is not None, "Target value for target_expected_improvement not specified in ACQUI_PARAMS."
+            
+            fig1, ax1 = beauty.plot_predicted_landscape(X_pool, pred_landscape_array[rep], columns=3)
+            
+            for i, tei_land in enumerate(pred_landscape_array[rep]):
+                # Create a regular grid for interpolation
+                grid_size = 100  # Adjust for smoother contours
+                x = np.linspace(X_pool[:, 0].min()-0.1, X_pool[:, 0].max()+0.1, grid_size)
+                y = np.linspace(X_pool[:, 1].min()-0.1, X_pool[:, 1].max()+0.1, grid_size)
+
+                # Create meshgrid
+                X, Y = np.meshgrid(x, y)
+                
+                # Interpolate the prediction values onto the grid
+                Z = griddata((X_pool[:, 0], X_pool[:, 1]), tei_land, (X, Y), method='linear')
+                
+                # Plot the contour at the target value
+                ax1[i].contour(
+                    X, Y, Z,
+                    levels=[target_value-target_epsilon, target_value, target_value+target_epsilon],
+                    colors='black',
+                    linestyles=['--', '-', '--'],
+                    linewidths=1.2
+                )
+
+                # Highlight the target area
+                ax1[i].contourf(
+                    X, Y, Z,
+                    levels=[target_value-target_epsilon, target_value+target_epsilon],
+                    colors='grey',
+                    alpha=0.2
+                )
+
+        # -------------------------------------------------------------------------------------------------------------
+        # 2. Plot the predicted landscape with the acquired points
+        rep_train_data = train_points_df[train_points_df['repetition'] == rep + 1]
+        fig, ax = beauty.plot_predicted_landscape(X_pool, pred_landscape_array[rep], columns=3)
 
         # plot train points having a different marker based on the predefined acquisition modes
         for i in range(len(ax)):
@@ -256,6 +315,90 @@ if __name__ == '__main__':
                         edgecolor='black'
                     )
 
+                    if tei_dict is not None:
+                        ax1[i].scatter(
+                            acqui_data[SEARCH_VAR[0]],
+                            acqui_data[SEARCH_VAR[1]],
+                            **acquisition_markers_dict.get(acqui_mode, {'marker': 'x', 'color': 'grey', 's': 20}),
+                            edgecolor='black'
+                        )
+
         fig.savefig(BENCHMARK_PATH / f'predicted_landscape_rep{rep+1}.png')
         plt.close(fig)
 
+        if tei_dict is not None:
+            fig1.savefig(BENCHMARK_PATH / f'predicted_landscape_tei_rep{rep+1}.png')
+            plt.close(fig1)
+
+        # -------------------------------------------------------------------------------------------------------------
+        # 3. RMSE per cycle against the ground truth landscape
+        gt_landscape = gt_df[TARGET_VAR].to_numpy().ravel()
+        rmse_per_cycle = [
+            np.sqrt(mean_squared_error(gt_landscape, pred_landscape_array[rep, cycle]))
+            for cycle in range(N_CYCLES)
+        ]
+        rmse_per_rep.append(rmse_per_cycle)
+
+        # -------------------------------------------------------------------------------------------------------------
+        # 4. JSD per cycle against the ground truth landscape
+        jsd_per_cycle = [
+            jsd_kde(gt_landscape, pred_landscape_array[rep, cycle])
+            for cycle in range(N_CYCLES)
+        ]
+        jsd_per_rep.append(jsd_per_cycle)
+
+
+    # -> 3. + 4. Plot the mean and std of the RMSE per cycle over the repetitions
+    # and the JSD per cycle over the repetitions
+    rmse_per_rep = np.array(rmse_per_rep)
+    mean_rmse = np.mean(rmse_per_rep, axis=0)
+    std_rmse = np.std(rmse_per_rep, axis=0)
+
+    jsd_per_rep = np.array(jsd_per_rep)
+    mean_jsd = np.mean(jsd_per_rep, axis=0)
+    std_jsd = np.std(jsd_per_rep, axis=0)
+
+    fig, ax = beauty.get_axes(2, 2)
+    ax[0].errorbar(
+        x=np.arange(1, N_CYCLES+1),
+        y=mean_rmse,
+        yerr=std_rmse,
+        fmt='-o',
+        color='blue',
+        ecolor='black',
+        elinewidth=1.5,
+        capsize=2.5
+    )
+    ax[0].set_xlabel('Cycle')
+    ax[0].set_ylabel('RMSE')
+    ax[0].set_title('Predicted landscape vs GT')
+    ax[0].grid(linestyle='--', alpha=0.5, zorder=-1)
+
+    ax[1].errorbar(
+        x=np.arange(1, N_CYCLES+1),
+        y=mean_jsd,
+        yerr=std_jsd,
+        fmt='-o',
+        color='green',
+        ecolor='black',
+        elinewidth=1.5,
+        capsize=2.5
+    )
+    ax[1].set_xlabel('Cycle')
+    ax[1].set_ylabel('JSD')
+    ax[1].set_title('Predicted landscape vs GT')
+    ax[1].grid(linestyle='--', alpha=0.5, zorder=-1)
+    
+    fig.tight_layout()
+    fig.savefig(BENCHMARK_PATH / 'rmse_jsd_per_cycle.png')
+    plt.close(fig)
+
+    # save the average rmse and jsd data as csv
+    rmse_jsd_df = pd.DataFrame({
+        'cycle': np.arange(1, N_CYCLES+1),
+        'mean_rmse': mean_rmse,
+        'std_rmse': std_rmse,
+        'mean_jsd': mean_jsd,
+        'std_jsd': std_jsd
+    })
+    rmse_jsd_df.to_csv(BENCHMARK_PATH / 'rmse_jsd_per_cycle.csv', index=False)

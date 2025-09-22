@@ -11,7 +11,7 @@ from activereg.utils import create_experiment_name
 # ---------------------------------------------------------------------------
 # --- PLOT FUNC
 
-def plot_predicted_landscape(X_pool: np.ndarray, pred_array: np.ndarray):
+def plot_predicted_landscape(X_pool: np.ndarray, pred_array: np.ndarray, columns: int=3, save_path: Path=None):
     """Plot the predicted landscape.
 
     Args:
@@ -22,7 +22,7 @@ def plot_predicted_landscape(X_pool: np.ndarray, pred_array: np.ndarray):
     # Check if the pred_array is 2D
 
     cycles, _ = pred_array.shape
-    fig, ax = get_axes(cycles, 4)
+    fig, ax = get_axes(cycles, columns)
 
     for i,pred in enumerate(pred_array):
         sc = ax[i].scatter(
@@ -32,7 +32,11 @@ def plot_predicted_landscape(X_pool: np.ndarray, pred_array: np.ndarray):
         _ = fig.colorbar(sc, ax=ax[i])
         ax[i].set_aspect('equal')
         fig.tight_layout()
-
+    
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches='tight')
+        plt.close(fig)
+        
     return fig, ax
 
 

@@ -171,7 +171,7 @@ def sampling_block(
         y_best: float, 
         ml_model: regmodels.MLModel, 
         acquisition_params: list[dict],
-        penlanscape_params: tuple[float, float] = (0.25, 1.0),
+        penalization_params: tuple[float, float] = (0.25, 1.0),
         sampling_mode: str = 'voronoi'
     ) -> tuple[list[int], np.ndarray]:
     """Samples new points from the landscape of the acquisition function.
@@ -182,7 +182,7 @@ def sampling_block(
         y_best (float): best value of the target variable.
         ml_model (regmodels.MLModel): machine learning model used for the experiment.
         acquisition_params (list[dict]): acquisition function parameters for the cycle.
-        penlanscape_params (tuple[float, float], optional): penalization parameters for the landscape. Defaults to (0.25, 1.0).
+        penalization_params (tuple[float, float], optional): penalization parameters for the landscape. Defaults to (0.25, 1.0).
         sampling_mode (str, optional): sampling mode for the landscape. Defaults to 'voronoi'.
 
     Returns:
@@ -192,7 +192,7 @@ def sampling_block(
     # init variables
     X_candidates_indexes = np.arange(0,len(X_candidates))
     X_train_copy = X_train.copy()
-    radius, strength = penlanscape_params
+    radius, strength = penalization_params
 
     sampled_new_idx = []
     landscape_list = []

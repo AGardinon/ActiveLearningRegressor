@@ -4,7 +4,7 @@ import json
 import shutil
 import numpy as np
 from datetime import datetime
-from scipy.stats import norm
+from scipy.stats import norm, entropy, gaussian_kde
 from pathlib import Path
 from torch import Tensor
 from torch.utils.data import TensorDataset, DataLoader
@@ -12,7 +12,6 @@ from typing import Tuple, List, Dict, Any
 
 
 # METRICS
-
 
 def evaluate_regression_metrics(y_true, y_mean, y_std, confidence=0.95) -> Dict:
     """
@@ -54,9 +53,64 @@ def evaluate_regression_metrics(y_true, y_mean, y_std, confidence=0.95) -> Dict:
         f"MPIW@{int(confidence*100)}%": mpiw
     }
 
+EPS = 1e-12
+
+def js_divergence_from_probs(p, q, base=2.0):
+    """Jensen-Shannon divergence between two probability vectors."""
+    p = np.asarray(p, dtype=float)
+    q = np.asarray(q, dtype=float)
+    # ensure same shape
+    assert p.shape == q.shape
+    p = p / (p.sum() + EPS)
+    q = q / (q.sum() + EPS)
+    m = 0.5 * (p + q)
+    return 0.5 * (entropy(p, m, base=base) + entropy(q, m, base=base))
+
+
+def jsd_histogram(samples_p, samples_q, nbins=100, range=None, base=2.0):
+    """
+    Compute JSD between two sample sets by histogramming them with the SAME bins.
+    - range: (min, max) or None -> automatic from combined samples.
+    """
+    samples_p = np.asarray(samples_p).ravel()
+    samples_q = np.asarray(samples_q).ravel()
+    if range is None:
+        mn = min(samples_p.min(), samples_q.min())
+        mx = max(samples_p.max(), samples_q.max())
+        # optionally pad a bit
+        pad = 1e-6 * (mx - mn + 1.0)
+        range = (mn - pad, mx + pad)
+    p_hist, edges = np.histogram(samples_p, bins=nbins, range=range, density=False)
+    q_hist, _     = np.histogram(samples_q, bins=nbins, range=range, density=False)
+    # convert counts to probabilities
+    p_prob = p_hist.astype(float) + EPS
+    q_prob = q_hist.astype(float) + EPS
+    p_prob /= p_prob.sum()
+    q_prob /= q_prob.sum()
+    return js_divergence_from_probs(p_prob, q_prob, base=base)
+
+
+def jsd_kde(samples_p, samples_q, grid_points=512, bandwidth=None, base=2.0):
+    """
+    KDE-based JSD: fit KDE to each sample set, evaluate on shared grid, compute JSD.
+    Less sensitive to bin edge issues.
+    """
+    samples_p = np.asarray(samples_p).ravel()
+    samples_q = np.asarray(samples_q).ravel()
+    mn = min(samples_p.min(), samples_q.min())
+    mx = max(samples_p.max(), samples_q.max())
+    grid = np.linspace(mn, mx, grid_points)
+    kde_p = gaussian_kde(samples_p, bw_method=bandwidth)
+    kde_q = gaussian_kde(samples_q, bw_method=bandwidth)
+    p_vals = kde_p(grid) + EPS
+    q_vals = kde_q(grid) + EPS
+    # make probabilities (sum to 1) using Riemann sum approximation
+    p_prob = p_vals / np.trapz(p_vals, grid)
+    q_prob = q_vals / np.trapz(q_vals, grid)
+    return js_divergence_from_probs(p_prob, q_prob, base=base)
+
 
 # EXPERIMENTS
-
 
 def numpy_to_dataloader(x: np.ndarray, y: np.ndarray = None, **kwargs) -> DataLoader:
     """

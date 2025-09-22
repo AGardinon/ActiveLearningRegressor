@@ -83,6 +83,11 @@ if __name__ == '__main__':
     N_BATCH = sum(acp['n_points'] for acp in ACQUI_PARAMS)
     N_REPS = args.repetitions
 
+    landscape_penalization = config.get('landscape_penalization', None)
+    if landscape_penalization is not None:
+        pen_radius = landscape_penalization.get('radius', None)
+        pen_strength = landscape_penalization.get('strength', None)
+
     # Get ground truth and evidence dataframes
     gt_df, evidence_df = get_gt_dataframes(config)
 
@@ -190,7 +195,7 @@ if __name__ == '__main__':
                 # Hard penalization: (0.25, 1.0) (radius, strength)
                 # Soft penalization: (0.25, 0.5) (radius, strength)
                 # Weak penalization: (0.25, 0.1) (radius, strength)
-                penalization_params=(0.25, 0.5)
+                penalization_params=(pen_radius, pen_strength) if landscape_penalization is not None else None
             )
 
             benchmark_data.append({

@@ -1,5 +1,5 @@
 # Experiment configuration for in-silico lab active learning simulation
-experiment_name: "insilico_lab_al_simulation_1"
+experiment_name: "insilico_lab_al_benchmark_6p_6c_expl_penalize"
 experiment_notes: "acqui_func.landscape_acquisition() with penalize landscape and predictiong only on candidates."
 experiment_evidence:
 
@@ -11,7 +11,7 @@ target_variables:
   - "Number_of_Particles"
 
 # Cycles parameters
-init_batch_size: 8
+init_batch_size: 3
 n_cycles: 6
 
 init_sampling: "fps"
@@ -36,19 +36,23 @@ data_scaler: "StandardScaler"
 
 # List of acquisition parameters functions to be used in the simulation
 acquisition_parameters:
-  - acquisition_mode: "expected_improvement"
-    percentile: 97
-    n_points: 2
+#   - acquisition_mode: "expected_improvement"
+#     percentile: 90
+#     n_points: 6
 
-  - acquisition_mode: "target_expected_improvement"
-    percentile: 97
-    y_target: 800
-    epsilon: 150
-    n_points: 2
+  # - acquisition_mode: "target_expected_improvement"
+  #   percentile: 90
+  #   y_target: 1000
+  #   epsilon: 150
+  #   n_points: 3
 
   - acquisition_mode: "exploration_mutual_info"
-    percentile: 97
-    n_points: 1
+    percentile: 90
+    n_points: 6
+
+landscape_penalization:
+  radius: 0.25
+  strength: 1.0
 
 # Path to the ground truth file in the datasets directory
 ground_truth_file: "gt_number_of_particles_maternw.csv"

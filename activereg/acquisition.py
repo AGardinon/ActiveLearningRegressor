@@ -23,8 +23,17 @@ def penalize_landscape_fast(
     radius: float = 0.1,
     strength: float = 1.0
     ) -> np.ndarray:
-    """
-    Fast version for large candidate sets using cKDTree.
+    """Fast version for large candidate sets using cKDTree.
+
+    Args:
+        landscape (np.ndarray): 
+        X_candidates (np.ndarray): 
+        X_train (np.ndarray): 
+        radius (float, optional): . Defaults to 0.1.
+        strength (float, optional): . Defaults to 1.0.
+
+    Returns:
+        np.ndarray: Corrected landscape.
     """
     if X_train.shape[0] == 0:
         return landscape
@@ -92,46 +101,51 @@ class AcquisitionFunction:
 # '''
 
 def upper_confidence_bound(X_candidates: np.ndarray, ml_model, kappa: float=2.0) -> Tuple[np.ndarray]:
-    """
-    Acquisition function: Upper Confidence Bound (UCB) function.
+    """Acquisition function: Upper Confidence Bound (UCB) function.
 
-    Parameters:
-    - X_candidates (np.ndarray): The candidate points to be evaluated.
-    - ml_model: A trained model from the models class (must support .predict with return_std=True).
-    - kappa (float): Exploration-exploitation tradeoff parameter (higher kappa favors exploration).
+    Args:
+        X_candidates (np.ndarray): Candidate points for evaluation.
+        ml_model (_type_): Trained model for predictions.
+        kappa (float, optional): Exploration-exploitation tradeoff parameter. Defaults to 2.0.
 
     Returns:
-    - np.ndarray: predicted values.
-    - np.ndarray: UCB values for each candidate point.
+        Tuple[np.ndarray]: Mean predictions and UCB scores.
     """
     _, mu, sigma = ml_model.predict(X_candidates)
     return mu, mu + kappa * sigma
 
 
 def uncertainty_landscape(X_candidates: np.ndarray, ml_model) -> Tuple[np.ndarray]:
-    """
-    Explore using the model uncertainty landscape
+    """Explore using the model uncertainty landscape
 
-    Parameters:
-    - X_candidates (np.ndarray): The candidate points to be evaluated.
-    - gp_model: A trained model from the models class (must support .predict with return_std=True).
+    Args:
+        X_candidates (np.ndarray): Candidate points for evaluation.
+        ml_model (_type_): Trained model for predictions.
 
     Returns:
-    - np.ndarray: predicted values.
-    - np.ndarray: model uncertainty per candidate points.
+        Tuple[np.ndarray]: Mean predictions and uncertainty scores.
     """
     _, mu, sigma = ml_model.predict(X_candidates)
     return mu, sigma
 
 
-def exploration_mutual_info(X_candidates, ml_model):
-    """
-    Score(x) = 0.5 * log(1 + sigma_f^2 / noise_var).
+def exploration_mutual_info(X_candidates: np.ndarray, ml_model) -> Tuple[np.ndarray]:
+    """Score(x) = 0.5 * log(1 + sigma_f^2 / noise_var).
     `noise_var` = observational noise variance (e.g., WhiteKernel(noise_level) from sklearn GPR).
+
+    Args:
+        X_candidates (np.ndarray): Candidate points for evaluation.
+        ml_model (_type_): Trained model for predictions.
+
+    Raises:
+        ValueError: If noise_level is not found.
+
+    Returns:
+        Tuple[np.ndarray]: Mean predictions and exploration scores.
     """
     try:
         noise_var = ml_model.model.kernel_.k2.noise_level
-    except:
+    except AttributeError:
         raise ValueError('noise_level not found, GPR needs to be trained with a WhiteKernel().')
 
     _, mu, sigma_y = ml_model.predict(X_candidates)
@@ -142,18 +156,16 @@ def exploration_mutual_info(X_candidates, ml_model):
 
 
 def expected_improvement(X_candidates: np.ndarray, ml_model, y_best: float, xi: float = 0.01) -> Tuple[np.ndarray]:
-    """
-    Acquisition function: Expected Improvement (EI).
+    """Acquisition function: Expected Improvement (EI).
 
-    Parameters:
-    - X_candidates (np.ndarray): The candidate points where EI will be evaluated.
-    - ml_model: A trained model from the models class (must support .predict with return_std=True).
-    - y_best (float): The best observed function value so far (e.g., max(y_train)).
-    - xi (float): Exploration-exploitation tradeoff parameter (higher xi favors exploration).
+    Args:
+        X_candidates (np.ndarray): Candidate points for evaluation.
+        ml_model (_type_): Trained model for predictions.
+        y_best (float): Best observed value.
+        xi (float, optional): Exploration-exploitation tradeoff parameter. Defaults to 0.01.
 
     Returns:
-    - np.ndarray: predicted values.
-    - np.ndarray: EI values for each candidate point.
+        Tuple[np.ndarray]: Mean predictions and EI scores.
     """
 
     # Get mean and standard deviation from the GP model
@@ -172,27 +184,25 @@ def expected_improvement(X_candidates: np.ndarray, ml_model, y_best: float, xi: 
     return mu, np.maximum(ei, 0)
 
 
-def target_expected_improvement(X_candidates, ml_model, y_target, *,
-                dist=None,        # use this for best-closeness TEI: d = current best distance to target
-                epsilon=None,  # use this for band TEI: epsilon = tolerance
-                clip_sigma=1e-12):
-    """
-    Mathematically derived Targeted Expected Improvement (TEI).
+def target_expected_improvement(X_candidates: np.ndarray, ml_model, y_target: float, *,
+                dist: float=None,        # use this for best-closeness TEI: d = current best distance to target
+                epsilon: float=None,     # use this for band TEI: epsilon = tolerance
+                clip_sigma: float=1e-12) -> Tuple[np.ndarray]:
+    """Mathematically derived Targeted Expected Improvement (TEI).
     Improvement: (d - |Y - t|)_+ where d = epsilon (band TEI) OR d = best_closeness (best-TEI).
 
-    Parameters
-    ----------
-    X_candidates : (N, D) array
-    ml_model     : has .predict(X, return_std=True) or wrapper equivalent returning (.., mu, sigma)
-    y_target     : float, target value t
-    d            : float, current best closeness to target (min_i |y_i - t|). Use for best-TEI
-    epsilon      : float, tolerance half-width. Use for band-TEI
-    clip_sigma   : float, min sigma to avoid division by zero
+    Args:
+        X_candidates (np.ndarray): Candidate points for evaluation.
+        ml_model (_type_): Trained model for predictions.
+        y_target (float): Target value t
+        epsilon (float, optional): Tolerance half-width. Defaults to None.
+        dist (float, optional): Current best distance to target. Defaults to None.
 
-    Returns
-    -------
-    mu : (N,) mean predictions
-    tei: (N,) TEI scores (maximize this)
+    Raises:
+        ValueError: If neither `d` nor `epsilon` is provided.
+
+    Returns:
+        Tuple[np.ndarray]: Mean predictions and TEI scores.
     """
     if (dist is None) == (epsilon is None):
         raise ValueError("Provide exactly one of `d` (best closeness) or `epsilon` (band width).")
@@ -222,4 +232,20 @@ def target_expected_improvement(X_candidates, ml_model, y_target, *,
     # numerical safety
     tei = np.maximum(tei, 0.0)
     return mu, tei
+
+
+def smart_target_expected_improvement(X_candidates: np.ndarray, ml_model, y_best: float, percentage: float) -> Tuple[np.ndarray]:
+    """Smart Targeted Expected Improvement (TEI) acquisition function.
+
+    Args:
+        X_candidates (np.ndarray): Candidate points for evaluation.
+        ml_model (_type_): Trained model for predictions.
+        y_best (float): Best observed value.
+        percentage (float): Percentage for target value adjustment.
+
+    Returns:
+        Tuple[np.ndarray]: Mean predictions and TEI scores.
+    """
+    y_target = y_best * (1 - percentage / 100)
+    return target_expected_improvement(X_candidates, ml_model, y_target, dist=abs(y_best - y_target))
 

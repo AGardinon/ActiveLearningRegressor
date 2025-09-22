@@ -160,7 +160,9 @@ def create_gpr_instance(config: dict) -> regmodels.MLModel:
     kernel_recipe = get_gp_kernel(kernel_recipe)
 
     model_parameters = config.get('model_parameters', {})
-    model_parameters['alpha'] = float(model_parameters['alpha'])
+    if 'alpha' in model_parameters:
+        model_parameters['alpha'] = float(model_parameters['alpha'])
+    # else use the default value from the regmodels.GPR class
 
     return regmodels.GPR(kernel=kernel_recipe, **model_parameters)
 

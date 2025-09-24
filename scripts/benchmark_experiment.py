@@ -25,7 +25,8 @@ from activereg.experiment import (get_gt_dataframes,
                                   setup_data_pool,
                                   setup_ml_model,
                                   remove_evidence_from_gt,
-                                  setup_experiment_variables)
+                                  setup_experiment_variables,
+                                  create_acquisition_params)
 from typing import List, Tuple
 
 # FUNCTIONS
@@ -79,14 +80,19 @@ if __name__ == '__main__':
      ACQUI_PARAMS,
      SEARCH_VAR,
      TARGET_VAR) = setup_experiment_variables(config)
+    
+    print(f"Experiment Name: {EXP_NAME}")
+    print(f"Search Variables: {SEARCH_VAR}")
+    print(f"Target Variable: {TARGET_VAR}")
+    print(f"Initial Sampling: {INIT_SAMPLING} with {INIT_BATCH} points")
 
-    N_BATCH = sum(acp['n_points'] for acp in ACQUI_PARAMS)
     N_REPS = args.repetitions
 
     landscape_penalization = config.get('landscape_penalization', None)
     if landscape_penalization is not None:
         pen_radius = landscape_penalization.get('radius', None)
         pen_strength = landscape_penalization.get('strength', None)
+        print(f"Landscape penalization activated with radius {pen_radius} and strength {pen_strength}.")
 
     # Get ground truth and evidence dataframes
     gt_df, evidence_df = get_gt_dataframes(config)
@@ -127,20 +133,22 @@ if __name__ == '__main__':
 
     benchmark_data = []
     train_points_data = []
-    pred_landscape_array = np.full((N_REPS, N_CYCLES, X_pool.shape[0]), np.nan)
-    unc_landscape_array = np.full((N_REPS, N_CYCLES, X_pool.shape[0]), np.nan)
+    pred_landscape_array = np.full((N_REPS, N_CYCLES+1, X_pool.shape[0]), np.nan)
+    unc_landscape_array = np.full((N_REPS, N_CYCLES+1, X_pool.shape[0]), np.nan)
 
-    # Get the acquisition mode per N_batch point that will be acquired
-    predefined_acquisition_modes = []
-    print("Predefined acquisition modes:")
-    for acp in ACQUI_PARAMS:
-        predefined_acquisition_modes.extend([acp['acquisition_mode']] * acp['n_points'])
-        print(f" - {acp['n_points']} points with {acp['acquisition_mode']} acquisition")
-    '''
-    TODO: set up a acquisition scheduler that can handle how many points to acquire at each cycle
-    following some rules in the config, eg, for the first 3 cycle only exploration and then mixed
-    -> understanding how to do this
-    '''
+    # Get the acquisition mode per N_batch point that will be acquired following 
+    # the acquisition protocol (if defined in the config file)
+
+    if config.get('acquisition_protocol', None) is not None:
+        ACQUI_PARAMS = None
+        predefined_acquisition_modes = None
+
+    else:
+        predefined_acquisition_modes = []
+        print("Predefined acquisition modes:")
+        for acp in ACQUI_PARAMS:
+            predefined_acquisition_modes.extend([acp['acquisition_mode']] * acp['n_points'])
+            print(f" - {acp['n_points']} points with {acp['acquisition_mode']} acquisition")
 
     for rep in range(N_REPS):
 
@@ -178,9 +186,21 @@ if __name__ == '__main__':
 
             print(f"--- Repetition {rep+1}/{N_REPS} | Cycle {cycle+1}/{N_CYCLES} ---")
 
+            # Get the acquisition parameters for the current cycle
+            if config.get('acquisition_protocol', None) is not None:
+                ACQUI_PARAMS = create_acquisition_params(
+                    acquisition_params=config.get('acquisition_parameters', []),
+                    acquisition_protocol=config.get('acquisition_protocol', {}),
+                    cycle=cycle
+                )
+                # print(f"Acquisition parameters for cycle {cycle+1}:")
+                predefined_acquisition_modes = []
+                for acp in ACQUI_PARAMS:
+                    predefined_acquisition_modes.extend([acp['acquisition_mode']] * acp['n_points'])
+                    print(f" - {acp['n_points']} points with {acp['acquisition_mode']} acquisition")
+
             # Compute the best screened value and train the model
             y_best = np.max(y_train)
-
             ML_MODEL.train(X_train, y_train)
             _, y_pred, y_unc = ML_MODEL.predict(X_pool)
 
@@ -227,7 +247,31 @@ if __name__ == '__main__':
             X_candidates = np.delete(X_candidates, sampled_indexes, axis=0)
             y_candidates = np.delete(y_candidates, sampled_indexes, axis=0)
 
+            # END of cycles
+            # -------------------------------------------------------------------------------- 
 
+        # Compute the final landscape after the last cycle with the full training set
+        # This is important for evaluating the final model performance without acquisition
+        # of new points (the tot. num of cycles is N_CYCLES+1 including the initial sampling)
+        y_best = np.max(y_train)
+        ML_MODEL.train(X_train, y_train)
+        _, y_pred, y_unc = ML_MODEL.predict(X_pool)
+
+        pred_landscape_array[rep, N_CYCLES] = y_pred
+        unc_landscape_array[rep, N_CYCLES] = y_unc
+
+        benchmark_data.append({
+            "repetition": rep+1,
+            "cycle": N_CYCLES+1,
+            "y_best_screened": y_best,
+            "y_best_predicted": np.max(y_pred),
+            "nll": ML_MODEL.model.log_marginal_likelihood().astype(float),
+            "model_params": ML_MODEL.__repr__()
+        })
+        # END of repetition
+        # --------------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------------
     # Save benchmark data to CSV
     benchmark_df = pd.DataFrame(benchmark_data)
     benchmark_df.to_csv(BENCHMARK_PATH / 'benchmark_data.csv', index=False)
@@ -238,7 +282,7 @@ if __name__ == '__main__':
     np.save(BENCHMARK_PATH / 'predicted_landscape.npy', pred_landscape_array)
     np.save(BENCHMARK_PATH / 'uncertainty_landscape.npy', unc_landscape_array)
 
-
+    # --------------------------------------------------------------------------------
     # PLOTS
 
     acquisition_markers_dict = {
@@ -304,7 +348,7 @@ if __name__ == '__main__':
 
         # plot train points having a different marker based on the predefined acquisition modes
         for i in range(len(ax)):
-            if i < N_CYCLES:
+            if i < N_CYCLES+1:
 
                 cycle_train_data = rep_train_data[rep_train_data['cycle'] <= i]
                 acquisition_modes = cycle_train_data['acquisition_source'].values
@@ -340,7 +384,7 @@ if __name__ == '__main__':
         gt_landscape = gt_df[TARGET_VAR].to_numpy().ravel()
         rmse_per_cycle = [
             np.sqrt(mean_squared_error(gt_landscape, pred_landscape_array[rep, cycle]))
-            for cycle in range(N_CYCLES)
+            for cycle in range(N_CYCLES+1)
         ]
         rmse_per_rep.append(rmse_per_cycle)
 
@@ -348,7 +392,7 @@ if __name__ == '__main__':
         # 4. JSD per cycle against the ground truth landscape
         jsd_per_cycle = [
             jsd_kde(gt_landscape, pred_landscape_array[rep, cycle])
-            for cycle in range(N_CYCLES)
+            for cycle in range(N_CYCLES+1)
         ]
         jsd_per_rep.append(jsd_per_cycle)
 
@@ -365,7 +409,7 @@ if __name__ == '__main__':
 
     fig, ax = beauty.get_axes(2, 2)
     ax[0].errorbar(
-        x=np.arange(1, N_CYCLES+1),
+        x=np.arange(1, N_CYCLES+2),
         y=mean_rmse,
         yerr=std_rmse,
         fmt='-o',
@@ -380,7 +424,7 @@ if __name__ == '__main__':
     ax[0].grid(linestyle='--', alpha=0.5, zorder=-1)
 
     ax[1].errorbar(
-        x=np.arange(1, N_CYCLES+1),
+        x=np.arange(1, N_CYCLES+2),
         y=mean_jsd,
         yerr=std_jsd,
         fmt='-o',
@@ -400,7 +444,7 @@ if __name__ == '__main__':
 
     # save the average rmse and jsd data as csv
     rmse_jsd_df = pd.DataFrame({
-        'cycle': np.arange(1, N_CYCLES+1),
+        'cycle': np.arange(1, N_CYCLES+2),
         'mean_rmse': mean_rmse,
         'std_rmse': std_rmse,
         'mean_jsd': mean_jsd,

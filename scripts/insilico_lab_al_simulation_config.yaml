@@ -1,5 +1,5 @@
 # Experiment configuration for in-silico lab active learning simulation
-experiment_name: "insilico_lab_al_benchmark_6p_6c_expl_penalize"
+experiment_name: "insilico_lab_al_benchmark_3p_6c_ei_tei_expl_protocol"
 experiment_notes: "acqui_func.landscape_acquisition() with penalize landscape and predictiong only on candidates."
 experiment_evidence:
 
@@ -11,7 +11,7 @@ target_variables:
   - "Number_of_Particles"
 
 # Cycles parameters
-init_batch_size: 3
+init_batch_size: 6
 n_cycles: 6
 
 init_sampling: "fps"
@@ -25,8 +25,8 @@ kernel_recipe: "RBF_W"
 
 # Additional paramters
 model_parameters:
-  n_restarts_optimizer: 150
-  alpha: 1e-10
+  n_restarts_optimizer: 300
+  # alpha: 1e-10
   normalize_y: true
   optimizer: 'fmin_l_bfgs_b'
   use_gridsearch: false
@@ -36,23 +36,32 @@ data_scaler: "StandardScaler"
 
 # List of acquisition parameters functions to be used in the simulation
 acquisition_parameters:
-#   - acquisition_mode: "expected_improvement"
-#     percentile: 90
-#     n_points: 6
+  - acquisition_mode: "expected_improvement"
+    percentile: 95
+    n_points: 3
 
-  # - acquisition_mode: "target_expected_improvement"
-  #   percentile: 90
-  #   y_target: 1000
-  #   epsilon: 150
-  #   n_points: 3
+  - acquisition_mode: "target_expected_improvement"
+    percentile: 95
+    y_target: 800
+    epsilon: 150
+    n_points: 3
 
   - acquisition_mode: "exploration_mutual_info"
-    percentile: 90
-    n_points: 6
+    percentile: 95
+    n_points: 3
 
 landscape_penalization:
   radius: 0.25
   strength: 1.0
+
+# Define stages with specific acquisition modes and cycle lengths 
+acquisition_protocol:
+  stage_1:
+    cycles: 3
+    acquisition_modes: ['expected_improvement', 'exploration_mutual_info']
+  stage_2:
+    cycles: 3
+    acquisition_modes: ['target_expected_improvement', 'expected_improvement']
 
 # Path to the ground truth file in the datasets directory
 ground_truth_file: "gt_number_of_particles_maternw.csv"

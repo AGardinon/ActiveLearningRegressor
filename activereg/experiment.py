@@ -252,3 +252,33 @@ def validation_block(gt_df: pd.DataFrame, sampled_df: pd.DataFrame, search_vars:
     )
     return merged_df.reset_index(drop=True)
 
+
+def create_acquisition_params(acquisition_params: list[dict], acquisition_protocol: dict, cycle: int) -> list[dict]:
+    """Create acquisition parameters for a specific cycle.
+    Each stage last for a number of cycles stated in the `cycles` key,
+    e.g. stage_1 lasts for 3 cycles, stage_2 lasts for 3 cycles, etc.
+    The function returns the acquisition parameters for the current cycle.
+
+    Args:
+        acquisition_params (list[dict]): List of acquisition parameters.
+        acquisition_protocol (dict): Acquisition protocol defining stages and cycles.
+        cycle (int): Current cycle number.
+
+    Returns:
+        list[dict]: Acquisition parameters for the current cycle.
+    """
+    total_cycles = sum([acquisition_protocol[stage]['cycles'] for stage in acquisition_protocol])
+    assert cycle < total_cycles, f"Cycle number {cycle} exceeds total cycles {total_cycles} defined in the acquisition protocol."
+
+    cycle_count = 0
+    for stage in acquisition_protocol:
+        n_cycles = acquisition_protocol[stage]['cycles']
+        
+        if cycle < cycle_count + n_cycles:
+            modes = acquisition_protocol[stage]['acquisition_modes']
+            acq_params_for_cycle = [acq for acq in acquisition_params if acq['acquisition_mode'] in modes]
+
+            return acq_params_for_cycle
+        
+        cycle_count += n_cycles
+

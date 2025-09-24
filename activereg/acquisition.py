@@ -71,6 +71,15 @@ class AcquisitionFunction:
         self.xi = kwargs.get('xi', 1.e-2)
         self.dist = kwargs.get('dist', None)
         self.epsilon = kwargs.get('epsilon', None)
+        self.tei_percentage = kwargs.get('percentage', None)
+
+        # assertions
+        if self.acquisition_mode == 'expected_improvement':
+            assert self.xi >= 0, "`xi` must be non-negative."
+        if self.acquisition_mode == 'target_expected_improvement':
+            assert (self.dist is None) != (self.epsilon is None), "Provide exactly one of `d` (best closeness) or `epsilon` (band width)."
+        if self.acquisition_mode == 'percentage_target_expected_improvement':
+            assert self.tei_percentage is not None, "`percentage` must be provided for percentage_target_expected_improvement."
 
     def landscape_acquisition(self, X_candidates: np.ndarray, ml_model):
         if self.acquisition_mode == 'upper_confidence_bound':
@@ -91,6 +100,12 @@ class AcquisitionFunction:
                                                y_target=self.y_target, 
                                                dist=self.dist, 
                                                epsilon=self.epsilon)
+        
+        elif self.acquisition_mode == 'percentage_target_expected_improvement':
+            return percentage_target_expected_improvement(X_candidates=X_candidates, 
+                                                          ml_model=ml_model, 
+                                                          y_best=self.y_best, 
+                                                          percentage=self.tei_percentage)
         
         elif self.acquisition_mode == 'exploration_mutual_info':
             return exploration_mutual_info(X_candidates=X_candidates, ml_model=ml_model)
@@ -234,8 +249,8 @@ def target_expected_improvement(X_candidates: np.ndarray, ml_model, y_target: fl
     return mu, tei
 
 
-def smart_target_expected_improvement(X_candidates: np.ndarray, ml_model, y_best: float, percentage: float) -> Tuple[np.ndarray]:
-    """Smart Targeted Expected Improvement (TEI) acquisition function.
+def percentage_target_expected_improvement(X_candidates: np.ndarray, ml_model, y_best: float, percentage: float) -> Tuple[np.ndarray]:
+    """Percentage Targeted Expected Improvement (TEI) acquisition function.
 
     Args:
         X_candidates (np.ndarray): Candidate points for evaluation.

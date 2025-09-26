@@ -61,6 +61,7 @@ class AcquisitionFunction:
                       'uncertainty_landscape', 
                       'expected_improvement',
                       'target_expected_improvement',
+                      'percentage_target_expected_improvement',
                       'exploration_mutual_info']
         assert acquisition_mode in self.modes, f'Function "{acquisition_mode}" not implemented, choose from {self.modes.keys()}'
 

@@ -239,7 +239,52 @@ class KernelFactory:
         else:
             raise ValueError(f"Invalid kernel definition: {kernel_recipe}")
 
-      
+# - MLP
+
+class MLP(nn.Module):
+    def __init__(
+        self, 
+        in_feats: int, 
+        hidden_layers: List[int], 
+        out_feats: int = 1, 
+        activation: str = "relu"):
+        """
+        Multi-layer Perceptron (MLP) with flexible hidden layers.
+        
+        Args:
+            in_feats (int): Number of input features.
+            hidden_layers (list[int]): List with neurons per hidden layer, e.g. [32, 64].
+            out_feats (int): Number of output features (targets).
+            activation (str): Activation function ('relu', 'tanh', 'sigmoid').
+        """
+        super().__init__()
+        
+        # Select activation
+        if activation == "relu":
+            self.activation = F.relu
+        elif activation == "tanh":
+            self.activation = torch.tanh
+        elif activation == "sigmoid":
+            self.activation = torch.sigmoid
+        else:
+            raise ValueError(f"Unknown activation {activation}")
+        
+        # Build layers
+        layers = []
+        prev_dim = in_feats
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            prev_dim = hidden_dim
+        layers.append(nn.Linear(prev_dim, out_feats))  # final output layer
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for layer in self.layers[:-1]:
+            x = self.activation(layer(x))
+        x = self.layers[-1](x)  # output layer without activation (regression)
+        return x
+
+
 #  - BAYESIAN NN
 
 class BayesianNN:

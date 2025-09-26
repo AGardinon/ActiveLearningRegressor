@@ -227,7 +227,7 @@ def sampling_block(
 
         sampled_new_idx += list(X_acq_landscape_indexes[sampled_hls_idx])
         landscape_list.append(landscape)
-        X_train_copy = np.concatenate([X_train, X_candidates[sampled_new_idx]])
+        X_train_copy = np.concatenate([X_train_copy, X_candidates[sampled_new_idx]])
 
     return sampled_new_idx, np.vstack(landscape_list)
 
@@ -281,4 +281,6 @@ def create_acquisition_params(acquisition_params: list[dict], acquisition_protoc
             return acq_params_for_cycle
         
         cycle_count += n_cycles
+
+    return []  # Fallback return, should not reach here if assertions are correct
 

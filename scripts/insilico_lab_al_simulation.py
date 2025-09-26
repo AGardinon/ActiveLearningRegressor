@@ -25,6 +25,10 @@ from activereg.experiment import (sampling_block,
                                   remove_evidence_from_gt,
                                   setup_experiment_variables)
 
+# TODO: implement extra features such as the ones in benchmark_experiment.py
+# - multiple acquisition functions per cycle
+# - protocol for acquisition functions per cycle
+
 # FUNCTIONS
 
 def create_insilico_al_experiment_paths(

@@ -1,5 +1,5 @@
 # Experiment configuration for in-silico lab active learning simulation
-experiment_name: "insilico_lab_al_benchmark_3p_6c_ei_tei_expl_protocol"
+experiment_name: "3rep_6c_3pt_protocol_1"
 experiment_notes: "acqui_func.landscape_acquisition() with penalize landscape and predictiong only on candidates."
 experiment_evidence:
 
@@ -37,18 +37,18 @@ data_scaler: "StandardScaler"
 # List of acquisition parameters functions to be used in the simulation
 acquisition_parameters:
   - acquisition_mode: "expected_improvement"
-    percentile: 95
-    n_points: 3
+    percentile: 90
+    n_points: 2
 
   - acquisition_mode: "target_expected_improvement"
-    percentile: 95
+    percentile: 90
     y_target: 800
     epsilon: 150
-    n_points: 3
+    n_points: 1
 
   - acquisition_mode: "exploration_mutual_info"
-    percentile: 95
-    n_points: 3
+    percentile: 90
+    n_points: 1
 
 landscape_penalization:
   radius: 0.25

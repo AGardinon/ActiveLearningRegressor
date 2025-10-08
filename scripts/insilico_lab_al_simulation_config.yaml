@@ -1,5 +1,5 @@
 # Experiment configuration for in-silico lab active learning simulation
-experiment_name: "3rep_6c_3pt_protocol_1"
+experiment_name: "3rep_5c_3pt_mi_ei-tei_ei_protocol"
 experiment_notes: "acqui_func.landscape_acquisition() with penalize landscape and predictiong only on candidates."
 experiment_evidence:
 
@@ -11,8 +11,8 @@ target_variables:
   - "Number_of_Particles"
 
 # Cycles parameters
-init_batch_size: 6
-n_cycles: 6
+init_batch_size: 3
+n_cycles: 5
 
 init_sampling: "fps"
 cycle_sampling: "voronoi"
@@ -38,17 +38,19 @@ data_scaler: "StandardScaler"
 acquisition_parameters:
   - acquisition_mode: "expected_improvement"
     percentile: 90
-    n_points: 2
 
-  - acquisition_mode: "target_expected_improvement"
+  - acquisition_mode: "target_expected_improvement_800"
     percentile: 90
     y_target: 800
     epsilon: 150
-    n_points: 1
+
+  - acquisition_mode: "target_expected_improvement_1200"
+    percentile: 90
+    y_target: 1200
+    epsilon: 150
 
   - acquisition_mode: "exploration_mutual_info"
     percentile: 90
-    n_points: 1
 
 landscape_penalization:
   radius: 0.25
@@ -58,10 +60,12 @@ landscape_penalization:
 acquisition_protocol:
   stage_1:
     cycles: 3
-    acquisition_modes: ['expected_improvement', 'exploration_mutual_info']
+    acquisition_modes: ['exploration_mutual_info', 'expected_improvement']
+    n_points: [2, 1]  # Number of points to acquire for each mode in stage 1
   stage_2:
-    cycles: 3
-    acquisition_modes: ['target_expected_improvement', 'expected_improvement']
+    cycles: 2
+    acquisition_modes: ['target_expected_improvement_800', 'expected_improvement']
+    n_points: [1, 2]
 
 # Path to the ground truth file in the datasets directory
 ground_truth_file: "gt_number_of_particles_maternw.csv"

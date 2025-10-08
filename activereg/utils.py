@@ -1,13 +1,15 @@
 #!
 
+import ot
 import json
 import shutil
 import numpy as np
-from datetime import datetime
 from scipy.stats import norm, entropy, gaussian_kde
-from pathlib import Path
+from sklearn.metrics.pairwise import rbf_kernel
 from torch import Tensor
 from torch.utils.data import TensorDataset, DataLoader
+from pathlib import Path
+from datetime import datetime
 from typing import Tuple, List, Dict, Any
 
 
@@ -108,6 +110,104 @@ def jsd_kde(samples_p, samples_q, grid_points=512, bandwidth=None, base=2.0):
     p_prob = p_vals / np.trapz(p_vals, grid)
     q_prob = q_vals / np.trapz(q_vals, grid)
     return js_divergence_from_probs(p_prob, q_prob, base=base)
+
+
+def prepare_measure(
+    X: np.ndarray, 
+    Y: np.ndarray, 
+    normalize: bool=True, 
+    shift_nonneg: bool=False, 
+    clip_min_to_zero: bool=True
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Prepare the input features and target masses for the metric computation.
+
+    Args:
+        X (np.ndarray): Input features of shape (N, d).
+        Y (np.ndarray): Input target values of shape (N,).
+        normalize (bool, optional): Whether to normalize the masses. Defaults to True.
+        shift_nonneg (bool, optional): Whether to shift the masses to be non-negative. Defaults to False.
+        clip_min_to_zero (bool, optional): Whether to clip the masses to be non-negative. Defaults to True.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: Prepared input features and target masses.
+    """
+    assert not (shift_nonneg and clip_min_to_zero), "Only one of shift_nonneg and clip_min_to_zero can be True"
+
+    masses = Y.astype(float)
+    if clip_min_to_zero:
+        masses = np.clip(masses, 0, None)
+    if shift_nonneg and masses.min() < 0 and not clip_min_to_zero:
+        masses = masses - masses.min()
+    masses[masses < 0] = 0.0
+    if normalize:
+        s = masses.sum()
+        if s > 0:
+            masses /= s
+    return X, masses
+
+
+def mmd_from_coords(
+    X1: np.ndarray, 
+    Y1: np.ndarray, 
+    X2: np.ndarray, 
+    Y2: np.ndarray, 
+    sigma: float=1.0, 
+    normalize: bool=True, 
+    shift_nonneg: bool=False, 
+    clip_min_to_zero: bool=True
+) -> float:
+    """Compute the Maximum Mean Discrepancy (MMD) between two distributions.
+
+    Args:
+        X1 (np.ndarray): Input features of shape (N, d).
+        Y1 (np.ndarray): Input target values of shape (N,).
+        X2 (np.ndarray): Input features of shape (M, d).
+        Y2 (np.ndarray): Input target values of shape (M,).
+        sigma (float, optional): Bandwidth parameter for the RBF kernel. Defaults to 1.0.
+        normalize (bool, optional): Whether to normalize the distributions. Defaults to True.
+        shift_nonneg (bool, optional): Whether to shift the masses to be non-negative. Defaults to False.
+        clip_min_to_zero (bool, optional): Whether to clip the masses to be non-negative
+
+    Returns:
+        float: The computed MMD value.
+    """
+    coords1, a = prepare_measure(X1, Y1, normalize=normalize, shift_nonneg=shift_nonneg, clip_min_to_zero=clip_min_to_zero)
+    coords2, b = prepare_measure(X2, Y2, normalize=normalize, shift_nonneg=shift_nonneg, clip_min_to_zero=clip_min_to_zero)
+    K11 = rbf_kernel(coords1, coords1, gamma=1.0/(2*sigma**2))
+    K22 = rbf_kernel(coords2, coords2, gamma=1.0/(2*sigma**2))
+    K12 = rbf_kernel(coords1, coords2, gamma=1.0/(2*sigma**2))
+    return a @ K11 @ a + b @ K22 @ b - 2 * a @ K12 @ b
+
+
+def emd_from_coords(
+    X1: np.ndarray,
+    Y1: np.ndarray,
+    X2: np.ndarray,
+    Y2: np.ndarray,
+    normalize=True,
+    shift_nonneg: bool=False,
+    clip_min_to_zero: bool=True
+) -> float:
+    """Compute the Earth Mover's Distance (EMD) between two distributions.
+
+    Args:
+        X1 (np.ndarray): Input features of shape (N, d).
+        Y1 (np.ndarray): Input target values of shape (N,).
+        X2 (np.ndarray): Input features of shape (M, d).
+        Y2 (np.ndarray): Input target values of shape (M,).
+        normalize (bool, optional): Whether to normalize the distributions. Defaults to True.
+        shift_nonneg (bool, optional): Whether to shift the masses to be non-negative. Defaults to False.
+        clip_min_to_zero (bool, optional): Whether to clip the masses to be non-negative. Defaults to True.
+
+    Returns:
+        float: The computed EMD value.
+    """
+    coords1, a = prepare_measure(X1, Y1, normalize=normalize, shift_nonneg=shift_nonneg, clip_min_to_zero=clip_min_to_zero)
+    coords2, b = prepare_measure(X2, Y2, normalize=normalize, shift_nonneg=shift_nonneg, clip_min_to_zero=clip_min_to_zero)
+    # pairwise Euclidean distance matrix
+    M = ot.dist(coords1, coords2, metric='euclidean')
+    cost = ot.emd2(a, b, M, numItermax=1e6)  # total transport cost
+    return cost
 
 
 # EXPERIMENTS

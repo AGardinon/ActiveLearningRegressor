@@ -15,11 +15,16 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
+from tqdm import tqdm
 from scipy.interpolate import griddata
 from sklearn.metrics import mean_squared_error
 from activereg import beauty
 from activereg.sampling import sample_landscape
-from activereg.utils import create_strict_folder, jsd_histogram, jsd_kde
+from activereg.utils import (create_strict_folder, 
+                             jsd_histogram, 
+                             jsd_kde,
+                             mmd_from_coords,
+                             emd_from_coords)
 from activereg.experiment import (get_gt_dataframes, 
                                   sampling_block, 
                                   setup_data_pool,
@@ -57,6 +62,9 @@ def create_benchmark_path(
     return benchmark_path, pool_csv_path, pool_df
 
 # MAIN
+
+#! The cycles will be N_CYCLES + 1 because of the last new prediction after the last acquisition
+#! is used to train the last model but not for any acquisition
 
 if __name__ == '__main__':
 
@@ -294,8 +302,14 @@ if __name__ == '__main__':
         'target_expected_improvement': {'marker': 'D', 'color': 'orange', 's': 20}
     }
 
-    rmse_per_rep = []
-    jsd_per_rep = []
+    rmse_vs_gt = []
+    rmse_vs_cycles = []
+    jsd_vs_gt = []
+    jsd_vs_cycles = []
+    mmd_vs_gt = []
+    mmd_vs_cycles = []
+    # emd_vs_gt = []
+    # emd_vs_cycles = []
 
     for rep in range(N_REPS):
 
@@ -353,9 +367,14 @@ if __name__ == '__main__':
                 cycle_train_data = rep_train_data[rep_train_data['cycle'] <= i]
                 acquisition_modes = cycle_train_data['acquisition_source'].values
 
-                for acqui_mode in acquisition_modes:
+                for am in acquisition_modes:
 
-                    acqui_data = cycle_train_data[cycle_train_data['acquisition_source'] == acqui_mode]
+                    if am.split('_')[-1].isdigit():
+                        acqui_mode = '_'.join(am.split('_')[:-1])
+                    else:
+                        acqui_mode = am
+
+                    acqui_data = cycle_train_data[cycle_train_data['acquisition_source'] == am]
 
                     ax[i].scatter(
                         acqui_data[SEARCH_VAR[0]],
@@ -380,40 +399,114 @@ if __name__ == '__main__':
             plt.close(fig1)
 
         # -------------------------------------------------------------------------------------------------------------
-        # 3. RMSE per cycle against the ground truth landscape
+        # 3. 
+        # a) RMSE per cycle against the ground truth landscape
         gt_landscape = gt_df[TARGET_VAR].to_numpy().ravel()
         rmse_per_cycle = [
             np.sqrt(mean_squared_error(gt_landscape, pred_landscape_array[rep, cycle]))
-            for cycle in range(N_CYCLES+1)
+            for cycle in tqdm(range(N_CYCLES+1), desc=f"Rep {rep+1} - RMSE vs GT")
         ]
-        rmse_per_rep.append(rmse_per_cycle)
+        rmse_vs_gt.append(rmse_per_cycle)
+
+        # b) RMSE per cycle against the previous cycle landscape
+        rmse_per_cycle_prev = [
+            np.sqrt(mean_squared_error(pred_landscape_array[rep, cycle-1], pred_landscape_array[rep, cycle]))
+            if cycle > 0 else np.nan
+            for cycle in tqdm(range(N_CYCLES+1), desc=f"Rep {rep+1} - RMSE vs cycle")
+        ]
+        rmse_vs_cycles.append(rmse_per_cycle_prev)
 
         # -------------------------------------------------------------------------------------------------------------
-        # 4. JSD per cycle against the ground truth landscape
+        # 4. 
+        # a) JSD per cycle against the ground truth landscape
         jsd_per_cycle = [
             jsd_kde(gt_landscape, pred_landscape_array[rep, cycle])
-            for cycle in range(N_CYCLES+1)
+            for cycle in tqdm(range(N_CYCLES+1), desc=f"Rep {rep+1} - JSD vs GT")
         ]
-        jsd_per_rep.append(jsd_per_cycle)
+        jsd_vs_gt.append(jsd_per_cycle)
 
+        # b) JSD per cycle against the previous cycle landscape
+        jsd_per_cycle_prev = [
+            jsd_kde(pred_landscape_array[rep, cycle-1], pred_landscape_array[rep, cycle])
+            if cycle > 0 else np.nan
+            for cycle in tqdm(range(N_CYCLES+1), desc=f"Rep {rep+1} - JSD vs cycle")
+        ]
+        jsd_vs_cycles.append(jsd_per_cycle_prev)
 
-    # -> 3. + 4. Plot the mean and std of the RMSE per cycle over the repetitions
+        # -------------------------------------------------------------------------------------------------------------
+        # 5.
+        # a) Maximum Mean Discrepancy (MMD) per cycle against the ground truth landscape
+        mmd_per_cycle = [
+            mmd_from_coords(
+                X_pool, gt_landscape,
+                X_pool, pred_landscape_array[rep, cycle],
+                normalize=True
+            )
+            for cycle in tqdm(range(N_CYCLES+1), desc=f"Rep {rep+1} - MMD vs GT")
+        ]
+        mmd_vs_gt.append(mmd_per_cycle)
+
+        # b) MMD per cycle against the previous cycle landscape
+        mmd_per_cycle_prev = [
+            mmd_from_coords(
+                X_pool, pred_landscape_array[rep, cycle-1],
+                X_pool, pred_landscape_array[rep, cycle],
+                normalize=True
+            ) if cycle > 0 else np.nan
+            for cycle in tqdm(range(N_CYCLES+1), desc=f"Rep {rep+1} - MMD vs cycle")
+        ]
+        mmd_vs_cycles.append(mmd_per_cycle_prev)
+
+        # # -------------------------------------------------------------------------------------------------------------
+        # # 6.
+        # # a) Earth Mover's Distance (EMD) per cycle against the ground truth landscape
+        # emd_per_cycle = [
+        #     emd_from_coords(
+        #         X_pool, gt_landscape,
+        #         X_pool, pred_landscape_array[rep, cycle],
+        #         normalize=True
+        #     )
+        #     for cycle in tqdm(range(N_CYCLES+1))
+        # ]
+        # emd_vs_gt.append(emd_per_cycle)
+
+        # # b) EMD per cycle against the previous cycle landscape
+        # emd_per_cycle_prev = [
+        #     emd_from_coords(
+        #         X_pool, pred_landscape_array[rep, cycle-1],
+        #         X_pool, pred_landscape_array[rep, cycle],
+        #         normalize=True
+        #     ) if cycle > 0 else np.nan
+        #     for cycle in tqdm(range(N_CYCLES+1))
+        # ]
+        # emd_vs_cycles.append(emd_per_cycle_prev)
+    
+    # ---------------------------------------------------------------------------------------------
+    # -> 3. + 4. + 5. + 6. Plot the mean and std of the metrics per cycle over the repetitions
     # and the JSD per cycle over the repetitions
-    rmse_per_rep = np.array(rmse_per_rep)
-    mean_rmse = np.mean(rmse_per_rep, axis=0)
-    std_rmse = np.std(rmse_per_rep, axis=0)
+    rmse_vs_gt = np.array(rmse_vs_gt)
+    mean_rmse_vs_gt = np.mean(rmse_vs_gt, axis=0)
+    std_rmse_vs_gt = np.std(rmse_vs_gt, axis=0)
 
-    jsd_per_rep = np.array(jsd_per_rep)
-    mean_jsd = np.mean(jsd_per_rep, axis=0)
-    std_jsd = np.std(jsd_per_rep, axis=0)
+    jsd_vs_gt = np.array(jsd_vs_gt)
+    mean_jsd_vs_gt = np.mean(jsd_vs_gt, axis=0)
+    std_jsd_vs_gt = np.std(jsd_vs_gt, axis=0)
 
-    fig, ax = beauty.get_axes(2, 2)
+    mmd_vs_gt = np.array(mmd_vs_gt)
+    mean_mmd_vs_gt = np.mean(mmd_vs_gt, axis=0)
+    std_mmd_vs_gt = np.std(mmd_vs_gt, axis=0)
+
+    # emd_vs_gt = np.array(emd_vs_gt)
+    # mean_emd_vs_gt = np.mean(emd_vs_gt, axis=0)
+    # std_emd_vs_gt = np.std(emd_vs_gt, axis=0)
+
+    fig, ax = beauty.get_axes(3, 2)
     ax[0].errorbar(
         x=np.arange(1, N_CYCLES+2),
-        y=mean_rmse,
-        yerr=std_rmse,
+        y=mean_rmse_vs_gt,
+        yerr=std_rmse_vs_gt,
         fmt='-o',
-        color='blue',
+        color='C0',
         ecolor='black',
         elinewidth=1.5,
         capsize=2.5
@@ -425,10 +518,10 @@ if __name__ == '__main__':
 
     ax[1].errorbar(
         x=np.arange(1, N_CYCLES+2),
-        y=mean_jsd,
-        yerr=std_jsd,
+        y=mean_jsd_vs_gt,
+        yerr=std_jsd_vs_gt,
         fmt='-o',
-        color='green',
+        color='C1',
         ecolor='black',
         elinewidth=1.5,
         capsize=2.5
@@ -437,17 +530,150 @@ if __name__ == '__main__':
     ax[1].set_ylabel('JSD')
     ax[1].set_title('Predicted landscape vs GT')
     ax[1].grid(linestyle='--', alpha=0.5, zorder=-1)
+
+    ax[2].errorbar(
+        x=np.arange(1, N_CYCLES+2),
+        y=mean_mmd_vs_gt,
+        yerr=std_mmd_vs_gt,
+        fmt='-o',
+        color='C2',
+        ecolor='black',
+        elinewidth=1.5,
+        capsize=2.5
+    )
+    ax[2].set_xlabel('Cycle')
+    ax[2].set_ylabel('MMD')
+    ax[2].set_title('Predicted landscape vs GT')
+    ax[2].grid(linestyle='--', alpha=0.5, zorder=-1)
+
+    # ax[3].errorbar(
+    #     x=np.arange(1, N_CYCLES+2),
+    #     y=mean_emd_vs_gt,
+    #     yerr=std_emd_vs_gt,
+    #     fmt='-o',
+    #     color='C3',
+    #     ecolor='black',
+    #     elinewidth=1.5,
+    #     capsize=2.5
+    # )
+    # ax[3].set_xlabel('Cycle')
+    # ax[3].set_ylabel('EMD')
+    # ax[3].set_title('Predicted landscape vs GT')
+    # ax[3].grid(linestyle='--', alpha=0.5, zorder=-1)
     
     fig.tight_layout()
-    fig.savefig(BENCHMARK_PATH / 'rmse_jsd_per_cycle.png')
+    fig.savefig(BENCHMARK_PATH / 'metrics_cycle_vs_gt.png')
     plt.close(fig)
 
+    # ---------------------------------------------------------------------------------------------
+    # -> 3. + 4. + 5. + 6. Plot the mean and std of the metrics per cycle over the repetitions
+    # and the JSD per cycle over the repetitions
+    rmse_vs_cycles = np.array(rmse_vs_cycles)
+    mean_rmse_vs_cycles = np.mean(rmse_vs_cycles, axis=0)
+    std_rmse_vs_cycles = np.std(rmse_vs_cycles, axis=0)
+
+    jsd_vs_cycles = np.array(jsd_vs_cycles)
+    mean_jsd_vs_cycles = np.mean(jsd_vs_cycles, axis=0)
+    std_jsd_vs_cycles = np.std(jsd_vs_cycles, axis=0)
+
+    mmd_vs_cycles = np.array(mmd_vs_cycles)
+    mean_mmd_vs_cycles = np.mean(mmd_vs_cycles, axis=0)
+    std_mmd_vs_cycles = np.std(mmd_vs_cycles, axis=0)
+
+    # emd_vs_cycles = np.array(emd_vs_cycles)
+    # mean_emd_vs_cycles = np.mean(emd_vs_cycles, axis=0)
+    # std_emd_vs_cycles = np.std(emd_vs_cycles, axis=0)
+
+    fig, ax = beauty.get_axes(3, 2)
+    ax[0].errorbar(
+        x=np.arange(1, N_CYCLES+2),
+        y=mean_rmse_vs_cycles,
+        yerr=std_rmse_vs_cycles,
+        fmt='-o',
+        color='C0',
+        ecolor='black',
+        elinewidth=1.5,
+        capsize=2.5
+    )
+    ax[0].set_xlabel('Cycle')
+    ax[0].set_ylabel('RMSE')
+    ax[0].set_title('Predicted landscape vs cycles')
+    ax[0].grid(linestyle='--', alpha=0.5, zorder=-1)
+
+    ax[1].errorbar(
+        x=np.arange(1, N_CYCLES+2),
+        y=mean_jsd_vs_cycles,
+        yerr=std_jsd_vs_cycles,
+        fmt='-o',
+        color='C1',
+        ecolor='black',
+        elinewidth=1.5,
+        capsize=2.5
+    )
+    ax[1].set_xlabel('Cycle')
+    ax[1].set_ylabel('JSD')
+    ax[1].set_title('Predicted landscape vs cycles')
+    ax[1].grid(linestyle='--', alpha=0.5, zorder=-1)
+
+    ax[2].errorbar(
+        x=np.arange(1, N_CYCLES+2),
+        y=mean_mmd_vs_cycles,
+        yerr=std_mmd_vs_cycles,
+        fmt='-o',
+        color='C2',
+        ecolor='black',
+        elinewidth=1.5,
+        capsize=2.5
+    )
+    ax[2].set_xlabel('Cycle')
+    ax[2].set_ylabel('MMD')
+    ax[2].set_title('Predicted landscape vs cycles')
+    ax[2].grid(linestyle='--', alpha=0.5, zorder=-1)
+
+    # ax[3].errorbar(
+    #     x=np.arange(1, N_CYCLES+2),
+    #     y=mean_emd_vs_cycles,
+    #     yerr=std_emd_vs_cycles,
+    #     fmt='-o',
+    #     color='C3',
+    #     ecolor='black',
+    #     elinewidth=1.5,
+    #     capsize=2.5
+    # )
+    # ax[3].set_xlabel('Cycle')
+    # ax[3].set_ylabel('EMD')
+    # ax[3].set_title('Predicted landscape vs cycles')
+    # ax[3].grid(linestyle='--', alpha=0.5, zorder=-1)
+    
+    fig.tight_layout()
+    fig.savefig(BENCHMARK_PATH / 'metrics_cycle_vs_cycles.png')
+    plt.close(fig)
+
+    # ---------------------------------------------------------------------------------------------
     # save the average rmse and jsd data as csv
-    rmse_jsd_df = pd.DataFrame({
+    metrics_cycle_vs_gt_df = pd.DataFrame({
         'cycle': np.arange(1, N_CYCLES+2),
-        'mean_rmse': mean_rmse,
-        'std_rmse': std_rmse,
-        'mean_jsd': mean_jsd,
-        'std_jsd': std_jsd
+        'mean_rmse': mean_rmse_vs_gt,
+        'std_rmse': std_rmse_vs_gt,
+        'mean_jsd': mean_jsd_vs_gt,
+        'std_jsd': std_jsd_vs_gt,
+        'mean_mmd': mean_mmd_vs_gt,
+        'std_mmd': std_mmd_vs_gt,
+        # 'mean_emd': mean_emd_vs_gt,
+        # 'std_emd': std_emd_vs_gt
     })
-    rmse_jsd_df.to_csv(BENCHMARK_PATH / 'rmse_jsd_per_cycle.csv', index=False)
+    metrics_cycle_vs_gt_df.to_csv(BENCHMARK_PATH / 'metrics_cycle_vs_gt.csv', index=False)
+
+    # save the average rmse and jsd data as csv
+    metrics_cycle_vs_cycles_df = pd.DataFrame({
+        'cycle': np.arange(1, N_CYCLES+2),
+        'mean_rmse': mean_rmse_vs_cycles,
+        'std_rmse': std_rmse_vs_cycles,
+        'mean_jsd': mean_jsd_vs_cycles,
+        'std_jsd': std_jsd_vs_cycles,
+        'mean_mmd': mean_mmd_vs_cycles,
+        'std_mmd': std_mmd_vs_cycles,
+        # 'mean_emd': mean_emd_vs_cycles,
+        # 'std_emd': std_emd_vs_cycles
+    })
+    metrics_cycle_vs_cycles_df.to_csv(BENCHMARK_PATH / 'metrics_cycle_vs_cycles.csv', index=False)

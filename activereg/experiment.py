@@ -273,7 +273,21 @@ def create_acquisition_params(acquisition_params: list[dict], acquisition_protoc
     cycle_count = 0
     for stage in acquisition_protocol:
         n_cycles = acquisition_protocol[stage]['cycles']
-        
+        n_points = acquisition_protocol[stage]['n_points']
+        modes = acquisition_protocol[stage]['acquisition_modes']
+
+        #TODO allow for additional parameters specific for all acquisition modes
+
+        # assert that the n_points tutple is the same length as the acquisition modes list
+        assert len(modes) == len(n_points), \
+            f"Number of acquisition modes {len(modes)} does not match number of n_points {len(n_points)} in stage {stage}."
+
+        # update the acquisition_params with the n_points for the current stage
+        for i, mode in enumerate(modes):
+            for acq in acquisition_params:
+                if acq['acquisition_mode'] == mode:
+                    acq['n_points'] = n_points[i]
+
         if cycle < cycle_count + n_cycles:
             modes = acquisition_protocol[stage]['acquisition_modes']
             acq_params_for_cycle = [acq for acq in acquisition_params if acq['acquisition_mode'] in modes]

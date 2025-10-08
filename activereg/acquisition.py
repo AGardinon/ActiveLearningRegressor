@@ -63,7 +63,14 @@ class AcquisitionFunction:
                       'target_expected_improvement',
                       'percentage_target_expected_improvement',
                       'exploration_mutual_info']
-        assert acquisition_mode in self.modes, f'Function "{acquisition_mode}" not implemented, choose from {self.modes.keys()}'
+        
+        # add possibility to handle an acquisition mode that ends with f'_{N}' for multuple definition of the 
+        # same acquisition function with different parameters (e.g. percentage_target_expected_improvement_5)
+        mode_split = acquisition_mode.split('_')
+        if mode_split[-1].isdigit() and '_'.join(mode_split[:-1]) in self.modes:
+            self.acquisition_mode = '_'.join(mode_split[:-1])
+        else:
+            assert acquisition_mode in self.modes, f'Function "{acquisition_mode}" not implemented, choose from {self.modes.keys()}'
 
         # additional parameters
         self.y_best = y_best

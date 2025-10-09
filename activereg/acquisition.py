@@ -59,6 +59,7 @@ class AcquisitionFunction:
         self.acquisition_mode = acquisition_mode
         self.modes = ['upper_confidence_bound', 
                       'uncertainty_landscape', 
+                      'maximum_predicted_value',
                       'expected_improvement',
                       'target_expected_improvement',
                       'percentage_target_expected_improvement',
@@ -117,6 +118,9 @@ class AcquisitionFunction:
         
         elif self.acquisition_mode == 'exploration_mutual_info':
             return exploration_mutual_info(X_candidates=X_candidates, ml_model=ml_model)
+        
+        elif self.acquisition_mode == 'maximum_predicted_value':
+            return maximum_predicted_value(X_candidates=X_candidates, ml_model=ml_model)
 
 # '''
 # The methods assume one of the activereg.mlmodel is used, where the predict statment
@@ -272,3 +276,21 @@ def percentage_target_expected_improvement(X_candidates: np.ndarray, ml_model, y
     y_target = y_best * (1 - percentage / 100)
     return target_expected_improvement(X_candidates, ml_model, y_target, dist=abs(y_best - y_target))
 
+
+def maximum_predicted_value(X_candidates: np.ndarray, ml_model) -> Tuple[np.ndarray]:
+    """Acquisition function: Maximum Predicted Value (MPV).
+    Returns a landscape that is zero everywhere except at the maximum predicted value.
+
+    Args:
+        X_candidates (np.ndarray): Candidate points for evaluation.
+        ml_model (_type_): Trained model for predictions.
+
+    Returns:
+        Tuple[np.ndarray]: Mean predictions and MPV scores.
+    """
+    _, mu, _ = ml_model.predict(X_candidates)
+
+    # Return a landscape that is zero everywhere except at the maximum predicted value
+    mpv = np.zeros_like(mu)
+    mpv[mu.argmax()] = 1.0
+    return mu, mpv

@@ -205,8 +205,21 @@ def sampling_block(
         n_points_per_style = acqui_param['n_points']
         percentile = acqui_param.pop('percentile')
 
+        # assert that if the acquisition mode is mpv the number of points is 1
+        if acqui_param['acquisition_mode'] == 'maximum_predicted_value':
+            assert n_points_per_style == 1, "Number of points must be 1 when using maximum_predicted_value acquisition mode."
+
         acqui_func = AcquisitionFunction(y_best=y_best, **acqui_param)
         _, landscape = acqui_func.landscape_acquisition(X_candidates=X_candidates, ml_model=ml_model)
+        # print(landscape.shape)
+
+        # skip if acquisition mode is maximum_predicted_value
+        if acqui_func.acquisition_mode == 'maximum_predicted_value':
+            acq_mpv_ndx = np.argmax(landscape)
+            sampled_new_idx += [X_candidates_indexes[acq_mpv_ndx]]
+            landscape_list.append(landscape)
+            X_train_copy = np.concatenate([X_train_copy, X_candidates[[acq_mpv_ndx]]])
+            continue
 
         penalized_landscape = penalize_landscape_fast(
             landscape=landscape, 

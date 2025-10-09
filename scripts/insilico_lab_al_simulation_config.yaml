@@ -1,5 +1,5 @@
 # Experiment configuration for in-silico lab active learning simulation
-experiment_name: "3rep_5c_3pt_mi_ei-tei_ei_protocol"
+experiment_name: "3rep_5c_5pt_mpv_test"
 experiment_notes: "acqui_func.landscape_acquisition() with penalize landscape and predictiong only on candidates."
 experiment_evidence:
 
@@ -11,7 +11,7 @@ target_variables:
   - "Number_of_Particles"
 
 # Cycles parameters
-init_batch_size: 3
+init_batch_size: 5
 n_cycles: 5
 
 init_sampling: "fps"
@@ -44,6 +44,9 @@ acquisition_parameters:
     y_target: 800
     epsilon: 150
 
+  - acquisition_mode: "maximum_predicted_value"
+    percentile: 'Max'
+
   - acquisition_mode: "target_expected_improvement_1200"
     percentile: 90
     y_target: 1200
@@ -59,9 +62,9 @@ landscape_penalization:
 # Define stages with specific acquisition modes and cycle lengths 
 acquisition_protocol:
   stage_1:
-    cycles: 3
-    acquisition_modes: ['exploration_mutual_info', 'expected_improvement']
-    n_points: [2, 1]  # Number of points to acquire for each mode in stage 1
+    cycles: 5
+    acquisition_modes: ['exploration_mutual_info', 'maximum_predicted_value']
+    n_points: [4, 1]  # Number of points to acquire for each mode in stage 1
   stage_2:
     cycles: 2
     acquisition_modes: ['target_expected_improvement_800', 'expected_improvement']

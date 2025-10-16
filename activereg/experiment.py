@@ -102,7 +102,7 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
         tuple: Contains experiment name, additional notes, number of cycles, initial batch size,
                initial sampling method, cycle sampling method, and acquisition parameters.
     """
-    exp_name = config.get('experiment_name', 'Insilico_AL_Simulation')
+    exp_name = config.get('experiment_name', None)
     additional_notes = config.get('experiment_notes', '')
     n_cycles = config.get('n_cycles', 3)
     init_batch = config.get('init_batch_size', 8)
@@ -142,6 +142,7 @@ def setup_ml_model(config: dict) -> regmodels.MLModel:
     if ml_model_type == 'GPR':
         return create_gpr_instance(config)
     else:
+        # TODO: add support for additional ML models, eg MLP+Anchoring, BNN
         raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR'].")
 
 
@@ -194,7 +195,6 @@ def sampling_block(
     # init variables
     X_candidates_indexes = np.arange(0,len(X_candidates))
     X_train_copy = X_train.copy()
-    radius, strength = penalization_params
 
     sampled_new_idx = []
     landscape_list = []
@@ -221,12 +221,16 @@ def sampling_block(
             X_train_copy = np.concatenate([X_train_copy, X_candidates[[acq_mpv_ndx]]])
             continue
 
-        penalized_landscape = penalize_landscape_fast(
-            landscape=landscape, 
-            X_candidates=X_candidates, 
-            X_train=X_train_copy,
-            radius=radius, strength=strength,
-        )
+        if penalization_params:
+            radius, strength = penalization_params
+            penalized_landscape = penalize_landscape_fast(
+                landscape=landscape, 
+                X_candidates=X_candidates, 
+                X_train=X_train_copy,
+                radius=radius, strength=strength,
+            )
+        else:
+            penalized_landscape = landscape
 
         acq_landscape_ndx = highest_landscape_selection(landscape=penalized_landscape, percentile=percentile)
         X_acq_landscape = X_candidates[acq_landscape_ndx]
@@ -311,3 +315,77 @@ def create_acquisition_params(acquisition_params: list[dict], acquisition_protoc
 
     return []  # Fallback return, should not reach here if assertions are correct
 
+
+class AcquisitionParametersGenerator:
+
+    def __init__(self, acquisition_params: list[dict], acquisition_protocol: dict, cycle_start_count: int = 0):
+        self.acquisition_params = acquisition_params
+        self.acquisition_protocol = acquisition_protocol
+        self.total_cycles = sum([acquisition_protocol[stage]['cycles'] for stage in acquisition_protocol])
+        self.cycle_start_count = cycle_start_count
+
+        # self.current_stage = None
+        # self.stage_cycle_count = 0
+        # self.stage_n_cycles = 0
+        # self.stage_modes = []
+        # self.stage_n_points = []
+
+        # assert that acquisition_params is provided and not empty
+        assert acquisition_params and len(acquisition_params) > 0, "Acquisition parameters must be provided and not empty."
+
+    def _protocol_params_for_cycle(self, cycle: int) -> dict:
+        """Get acquisition parameters for a specific cycle, indipendently of the state of the class.
+        Each stage last for a number of cycles stated in the `cycles` key:
+        e.g. stage_1 lasts for 3 cycles, stage_2 lasts for 3 cycles, etc.
+        The function returns the acquisition parameters for the current cycle.
+
+        Args:
+            cycle (int): Current cycle number.
+        Returns:
+            list[dict]: Acquisition parameters for the current cycle.
+        """
+        assert cycle < self.total_cycles, f"Cycle number {cycle} exceeds total cycles {self.total_cycles} defined in the acquisition protocol."
+
+        cycle_count = self.cycle_start_count
+        for stage in self.acquisition_protocol:
+            n_cycles = self.acquisition_protocol[stage]['cycles']
+            n_points = self.acquisition_protocol[stage]['n_points']
+            modes = self.acquisition_protocol[stage]['acquisition_modes']
+
+            #TODO allow for additional parameters specific for all acquisition modes
+
+            # assert that the n_points list is the same length as the acquisition modes list
+            assert len(modes) == len(n_points), \
+                f"Number of acquisition modes {len(modes)} does not match number of n_points {len(n_points)} in stage {stage} (starting count: {self.cycle_start_count})."
+            
+            # update the acquisition_params with the n_points for the current stage
+            for i, mode in enumerate(modes):
+                for acq in self.acquisition_params:
+                    if acq['acquisition_mode'] == mode:
+                        acq['n_points'] = n_points[i]
+
+            if cycle < cycle_count + n_cycles:
+                modes = self.acquisition_protocol[stage]['acquisition_modes']
+                acq_params_for_cycle = [acq for acq in self.acquisition_params if acq['acquisition_mode'] in modes]
+
+                return acq_params_for_cycle
+            
+            cycle_count += n_cycles
+
+        return []
+
+
+    def get_params_for_cycle(self, cycle: int) -> list[dict]:
+        """Get acquisition parameters for a specific cycle.
+        Follows the acquisition protocol if provided, otherwise returns the acquisition parameters as is.
+
+        Args:
+            cycle (int): Current cycle number.
+        Returns:
+            list[dict]: Acquisition parameters for the current cycle.
+        """
+
+        if self.acquisition_protocol and len(self.acquisition_protocol) > 0:
+            return self._protocol_params_for_cycle(cycle)
+        else:
+            return self.acquisition_params

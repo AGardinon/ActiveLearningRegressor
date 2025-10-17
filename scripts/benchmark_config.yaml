@@ -1,0 +1,81 @@
+# ------------------------------------------------------------------------------
+# Benchmark configuration file for Active Learning Regressor experiments
+# ------------------------------------------------------------------------------
+experiment_name: "hartmann3d_benchmark_test"
+experiment_notes: "Benchmarking the Hartmann 3D function"
+
+# Path to the ground truth file in the datasets directory
+ground_truth_file: "hartmann3d_lhs.csv"
+
+search_space_variables:
+  - "x1"
+  - "x2"
+  - "x3"
+  # - "x4"
+  # - "x5"
+  # - "x6"
+
+target_variables:
+  - "y"
+
+# Cycles parameters
+init_batch_size: 5
+n_cycles: 5
+
+init_sampling: "random"
+cycle_sampling: "voronoi"
+
+# ML model configuration (GPR)
+# Kernel configuration for GPR
+# either "RBF_W" or "MATERN_W" or custom recipe
+ml_model: "GPR"
+kernel_recipe: "MATERN_W"
+
+# Additional paramters
+model_parameters:
+  n_restarts_optimizer: 300
+  alpha: 1e-10
+  normalize_y: true
+  optimizer: 'fmin_l_bfgs_b'
+  use_gridsearch: false
+  log_transform: false
+
+data_scaler: "StandardScaler"
+scaler_params:
+
+# List of acquisition parameters functions to be used in the simulation
+acquisition_parameters:
+  - acquisition_mode: "expected_improvement"
+    percentile: 90
+
+  - acquisition_mode: "target_expected_improvement_800"
+    percentile: 90
+    y_target: 800
+    epsilon: 150
+
+  - acquisition_mode: "maximum_predicted_value"
+    percentile: 'Max'
+
+  - acquisition_mode: "target_expected_improvement_1200"
+    percentile: 90
+    y_target: 1200
+    epsilon: 150
+
+  - acquisition_mode: "exploration_mutual_info"
+    percentile: 90
+
+  - acquisition_mode: "percentage_target_expected_improvement"
+    percentile: 90
+    percentage: 80
+
+landscape_penalization:
+  # radius: 0.25
+  # strength: 1.0
+
+# Define stages with specific acquisition modes and cycle lengths 
+acquisition_protocol:
+  stage_1:
+    cycles: 5
+    acquisition_modes: ['exploration_mutual_info', 'percentage_target_expected_improvement', 'expected_improvement']
+    n_points: [2, 1, 2]  # Number of points to acquire for each mode in stage 1
+

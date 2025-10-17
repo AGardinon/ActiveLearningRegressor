@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import activereg.mlmodel as regmodels
 from sklearn.base import BaseEstimator
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from activereg.format import DATASETS_REPO
 from activereg.sampling import sample_landscape
 from activereg.hyperparams import get_gp_kernel
@@ -38,26 +37,17 @@ def get_gt_dataframes(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     return gt_df, evidence_df
 
 
-def setup_data_pool(df: pd.DataFrame, search_var: list[str], scaler: str) -> tuple[np.ndarray, BaseEstimator]:
+def setup_data_pool(df: pd.DataFrame, search_var: list[str], scaler: BaseEstimator) -> tuple[np.ndarray, BaseEstimator]:
     """Gets the search space and scales it using StandardScaler or MinMaxScaler.
 
     Args:
         df (pd.DataFrame): pool dataframe.
         search_var (list[str]): list of search variable names.
-        scaler (str): type of scaler to use ('StandardScaler' or 'MinMaxScaler')
+        scaler (BaseEstimator): pre-initialized scaler instance
 
     Returns:
         tuple[np.ndarray, BaseEstimator]: scaled search space as a numpy array and the scaler instance
     """
-    scaler_classes = {
-        'StandardScaler': StandardScaler,
-        'MinMaxScaler': MinMaxScaler
-    }
-    
-    ScalerClass = scaler_classes.get(scaler)
-    if ScalerClass is None:
-        raise ValueError(f"Scaler {scaler} is not supported. Use {', '.join(scaler_classes.keys())}.")
-
     df = df.copy()
     search_var = search_var or df.columns.tolist()
     
@@ -66,10 +56,9 @@ def setup_data_pool(df: pd.DataFrame, search_var: list[str], scaler: str) -> tup
 
     # Scale the dataframe
     X = df[search_var].to_numpy()
-    scaler_instance = ScalerClass()
-    X_scaled_array = scaler_instance.fit_transform(X)
+    X_scaled_array = scaler.fit_transform(X)
 
-    return X_scaled_array, scaler_instance
+    return X_scaled_array, scaler
 
 
 def remove_evidence_from_gt(gt: pd.DataFrame, evidence: pd.DataFrame, search_vars: list[str]) -> pd.DataFrame:
@@ -94,6 +83,14 @@ def remove_evidence_from_gt(gt: pd.DataFrame, evidence: pd.DataFrame, search_var
 
 def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, str, list[dict]]:
     """Sets up the experiment parameters from the config dictionary.
+    The configuration dictionary must contain the following keys:
+    - experiment_name (str): Name of the experiment.
+    - experiment_notes (str): Additional notes for the experiment.
+    - n_cycles (int): Number of active learning cycles.
+    - init_batch_size (int): Initial batch size.
+    - init_sampling (str): Initial sampling method.
+    - cycle_sampling (str): Cycle sampling method.
+    - acquisition_parameters (list[dict]): Acquisition function parameters.
 
     Args:
         config (dict): Configuration dictionary containing experiment parameters.

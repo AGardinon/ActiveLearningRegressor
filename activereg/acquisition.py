@@ -1,11 +1,10 @@
 #!
 
-import torch
 import numpy as np
 from scipy.stats import norm
 from scipy.spatial import cKDTree
-# from sklearn.metrics import pairwise_distances
 from typing import Tuple
+#TODO: make the acquisition functions work without the model instance, make the model instance required in the class
 
 def highest_landscape_selection(landscape: np.ndarray, percentile: int=80):
     """

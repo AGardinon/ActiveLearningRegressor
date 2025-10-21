@@ -132,8 +132,9 @@ class DatasetGenerator:
         X_train = self.sample_space(n_samples, method=method, seed=self.seed, **kwargs_sampling)
         y_train = self.compute_function_values(X_train, function, noise_std=noise_std, negate=negate, **kwargs_function)
 
-        X_val = self.sample_space(int(n_samples * val_size), method=method, seed=self.seed+13, **kwargs_sampling)
-        y_val = self.compute_function_values(X_val, function, noise_std=noise_std, negate=negate, **kwargs_function)
+        if val_size > 0.0:
+            X_val = self.sample_space(int(n_samples * val_size), method=method, seed=self.seed+13, **kwargs_sampling)
+            y_val = self.compute_function_values(X_val, function, noise_std=noise_std, negate=negate, **kwargs_function)
 
         # Add the possibility of handling multi-target outputs in the future
         if len(y_train.shape) > 1:
@@ -148,10 +149,13 @@ class DatasetGenerator:
             train_data[label] = y_train[:, i] if len(y_train.shape) > 1 else y_train
         train_data['set'] = 'train'
 
-        val_data = pd.DataFrame(X_val, columns=self.dimension_names)
-        for i, label in enumerate(self.target_label):
-            val_data[label] = y_val[:, i] if len(y_val.shape) > 1 else y_val
-        val_data['set'] = 'val'
+        if val_size > 0.0:
+            val_data = pd.DataFrame(X_val, columns=self.dimension_names)
+            for i, label in enumerate(self.target_label):
+                val_data[label] = y_val[:, i] if len(y_val.shape) > 1 else y_val
+            val_data['set'] = 'val'
+        elif val_size == 0.0:
+            val_data = pd.DataFrame(columns=train_data.columns)
 
         dataset = pd.concat([train_data, val_data], ignore_index=True)
         return dataset

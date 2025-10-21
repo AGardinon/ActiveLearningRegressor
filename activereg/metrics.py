@@ -3,6 +3,7 @@
 import ot
 import numpy as np
 from scipy.stats import norm, entropy, gaussian_kde
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.metrics.pairwise import rbf_kernel
 
 # TODO: add more metrics to the evaluation function
@@ -13,45 +14,37 @@ CONFIDENCE = 0.95  # default confidence level
 
 # METRICS
 
-# def evaluate_regression_metrics(y_true, y_mean, y_std, confidence=0.95) -> Dict:
-#     """
-#     Evaluate regression predictions with uncertainty estimates.
 
-#     Args:
-#         y_true (np.ndarray): True target values. Shape (N,)
-#         y_mean (np.ndarray): Predicted mean values. Shape (N,)
-#         y_std (np.ndarray): Predicted standard deviations. Shape (N,)
-#         confidence (float): Confidence level for interval (default: 0.95)
+def evaluate_cycle_metrics(
+    y_pred_pool: np.ndarray,
+    y_pred_val: np.ndarray | None,
+    y_uncertainty_val: np.ndarray | None,
+    y_true_pool: np.ndarray,
+    y_true_val: np.ndarray | None,
+) -> dict:
+    """Evaluate cycle metrics.
 
-#     Returns:
-#         dict: Dictionary with RMSE, MAE, NLL, PICP, and MPIW
-#     """
-#     y_true = np.asarray(y_true)
-#     y_mean = np.asarray(y_mean)
-#     y_std = np.asarray(y_std)
+    Args:
+        y_pred_pool (np.ndarray): Predicted values for the pool.
+        y_pred_val (np.ndarray | None): Predicted values for the validation set.
+        y_uncertainty_val (np.ndarray | None): Uncertainty estimates for the validation set.
+        y_true_pool (np.ndarray): True values for the pool.
+        y_true_val (np.ndarray | None): True values for the validation set.
 
-#     # Basic error metrics
-#     rmse = np.sqrt(np.mean((y_true - y_mean)**2))
-#     mae = np.mean(np.abs(y_true - y_mean))
-
-#     # Negative Log-Likelihood (Gaussian assumption)
-#     nll = -np.mean(norm.logpdf(y_true, loc=y_mean, scale=y_std + 1e-6))  # add epsilon for numerical stability
-
-#     # Prediction Interval Coverage Probability (PICP)
-#     lower, upper = norm.interval(confidence, loc=y_mean, scale=y_std + 1e-6)
-#     picp = np.mean((y_true >= lower) & (y_true <= upper))
-
-#     # Mean Prediction Interval Width (MPIW)
-#     z = norm.ppf(0.5 + confidence / 2)
-#     mpiw = 2 * z * np.mean(y_std)
-
-#     return {
-#         "RMSE": rmse,
-#         "MAE": mae,
-#         "NLL": nll,
-#         f"PICP@{int(confidence*100)}%": picp,
-#         f"MPIW@{int(confidence*100)}%": mpiw
-#     }
+    Returns:
+        dict: Dictionary with evaluation metrics.
+    """
+    return {
+        "y_best_predicted_pool": np.max(y_pred_pool),
+        "y_best_predicted_val": np.max(y_pred_val) if y_pred_val is not None else np.nan,
+        "rmse_vs_gt_pool": np.sqrt(mean_squared_error(y_true=y_true_pool, y_pred=y_pred_pool)),
+        "mae_vs_gt_pool": mean_absolute_error(y_true=y_true_pool, y_pred=y_pred_pool),
+        "rmse_vs_gt_val": np.sqrt(mean_squared_error(y_true=y_true_val, y_pred=y_pred_val)) if y_pred_val is not None else np.nan,
+        "mae_vs_gt_val": mean_absolute_error(y_true=y_true_val, y_pred=y_pred_val) if y_pred_val is not None else np.nan,
+        "nll_val": nll_gauss(y_true=y_true_val, y_mean=y_pred_val, y_std=y_uncertainty_val) if (y_pred_val is not None and y_uncertainty_val is not None) else np.nan,
+        "picp95_val": picp(y_true=y_true_val, y_mean=y_pred_val, y_std=y_uncertainty_val) if (y_pred_val is not None and y_uncertainty_val is not None) else np.nan,
+        "mpiw95_val": mpiw(y_mean=y_pred_val, y_std=y_uncertainty_val) if (y_pred_val is not None and y_uncertainty_val is not None) else np.nan,
+    }
 
 # --------------------------------------------------------------------------------
 # Uncertainty & regression metrics

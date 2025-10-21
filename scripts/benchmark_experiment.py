@@ -7,10 +7,16 @@
 '''
 TODO:
 - Adding new metrics:
-    - Negative Log-Likelihood (predictive NLL) on the validation set
-    - Calibration metrics: PICP@a and MPIW@a (e.g. a=95%)
+    x Negative Log-Likelihood (predictive NLL) on the validation set
+    x Calibration metrics: PICP@a and MPIW@a (e.g. a=95%)
     - If multi-objective: Hypervolume (HV) and Hypervolume Improvement (HVI)
     - Optimization / goal-directed metrics: improvement per query, cumulative regret, time-to-target
+
+x Refactor the metric computation into a dedicated function for clarity and reusability.
+
+- Refine the space sampling as the function in high dimensional spaces can be tricky to handle
+due to low density of points in the area to optimize.
+    - Adaptive LHS sampling to improve POOL coverage
 '''
 
 import yaml
@@ -20,7 +26,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from activereg.metrics import evaluate_cycle_metrics
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
 from activereg.experiment import (get_gt_dataframes, 
@@ -95,13 +101,9 @@ def data_scaler_setup(config: dict) -> BaseEstimator:
     return scaler
 
 # ------------------------------------------------------------------------------------------
-# MAIN
-
-#! The cycles will be N_CYCLES + 1 because of the last new prediction after the last acquisition
-#! is used to train the last model but not for any acquisition
+# MAIN EXPERIMENT SCRIPT
 
 if __name__ == '__main__':
-
     # ------------------------------------------------------------------------------------------
     # Parse the config.yaml
     parser = argparse.ArgumentParser(description="Read a YAML config file.")
@@ -268,21 +270,21 @@ if __name__ == '__main__':
                 val_pred_landscape_array[rep, cycle] = y_pred_val
                 val_unc_landscape_array[rep, cycle] = y_unc_val
 
-            benchmark_data.append({
+            # Store benchmark data for the current cycle
+            cycle_data_dict = {
                 "repetition": rep+1,
                 "cycle": cycle+1,
                 "y_best_screened": y_best,
-                "y_best_predicted_pool": np.max(y_pred_pool),
-                "y_best_predicted_val": np.max(y_pred_val) if y_pred_val is not None else np.nan,
-                "rmse_vs_gt_pool": np.sqrt(mean_squared_error(pool_target_landscape, pool_pred_landscape_array[rep, cycle])),
-                "rmse_vs_gt_val": np.sqrt(mean_squared_error(val_target_landscape, y_pred_val)) if y_pred_val is not None else np.nan,
-                "mae_vs_gt_pool": mean_absolute_error(pool_target_landscape, pool_pred_landscape_array[rep, cycle]),
-                "mae_vs_gt_val": mean_absolute_error(val_target_landscape, y_pred_val) if y_pred_val is not None else np.nan,
-                "rmse_vs_prev": np.sqrt(mean_squared_error(pool_pred_landscape_array[rep, cycle-1], pool_pred_landscape_array[rep, cycle])) if cycle > 0 else np.nan,
-                "mae_vs_prev": mean_absolute_error(pool_pred_landscape_array[rep, cycle-1], pool_pred_landscape_array[rep, cycle]) if cycle > 0 else np.nan,
-                # "nll": ML_MODEL.model.log_marginal_likelihood().astype(float) if config.get('ml_model', {}) == 'GPR' else np.nan
-                # TODO: add other metrics
-            })
+            }
+            cycle_metrics_dict = evaluate_cycle_metrics(
+                y_true_pool=pool_target_landscape,
+                y_pred_pool=y_pred_pool,
+                y_true_val=val_target_landscape,
+                y_pred_val=y_pred_val,
+                y_uncertainty_val=y_unc_val
+            )
+            cycle_data_dict.update(cycle_metrics_dict)
+            benchmark_data.append(cycle_data_dict)
 
             # Update the train and candidates sets
             X_train = np.vstack((X_train, X_candidates[sampled_indexes]))
@@ -303,42 +305,11 @@ if __name__ == '__main__':
             # END of cycles
             # -------------------------------------------------------------------------------- 
 
-        # --------------------------------------------------------------------------------
-        # Compute the final landscape after the last cycle with the full training set
-        # This is important for evaluating the final model performance without acquisition
-        # of new points (the tot. num of cycles is N_CYCLES+1 including the initial sampling)
-        y_best = np.max(y_train)
-        ML_MODEL.train(X_train, y_train)
-        _, y_pred_pool, y_unc_pool = ML_MODEL.predict(X_pool)
-        _, y_pred_val, y_unc_val = ML_MODEL.predict(X_val) if X_val is not None else (None, None, None)
-
-        pool_pred_landscape_array[rep, N_CYCLES] = y_pred_pool
-        pool_unc_landscape_array[rep, N_CYCLES] = y_unc_pool
-
-        if X_val is not None:
-            val_pred_landscape_array[rep, N_CYCLES] = y_pred_val
-            val_unc_landscape_array[rep, N_CYCLES] = y_unc_val
-
-        benchmark_data.append({
-            "repetition": rep+1,
-            "cycle": N_CYCLES+1,
-            "y_best_screened": y_best,
-            "y_best_predicted_pool": np.max(y_pred_pool),
-            "y_best_predicted_val": np.max(y_pred_val) if y_pred_val is not None else np.nan,
-            "rmse_vs_gt_pool": np.sqrt(mean_squared_error(pool_target_landscape, pool_pred_landscape_array[rep, cycle])),
-            "rmse_vs_gt_val": np.sqrt(mean_squared_error(val_target_landscape, y_pred_val)) if y_pred_val is not None else np.nan,
-            "mae_vs_gt_pool": mean_absolute_error(pool_target_landscape, pool_pred_landscape_array[rep, cycle]),
-            "mae_vs_gt_val": mean_absolute_error(val_target_landscape, y_pred_val) if y_pred_val is not None else np.nan,
-            "rmse_vs_prev": np.sqrt(mean_squared_error(pool_pred_landscape_array[rep, cycle-1], pool_pred_landscape_array[rep, cycle])) if cycle > 0 else np.nan,
-            "mae_vs_prev": mean_absolute_error(pool_pred_landscape_array[rep, cycle-1], pool_pred_landscape_array[rep, cycle]) if cycle > 0 else np.nan,
-            # "nll": ML_MODEL.model.log_marginal_likelihood().astype(float) if config.get('ml_model', {}) == 'GPR' else np.nan
-            # TODO: add other metrics
-        })
         # END of repetition
         # --------------------------------------------------------------------------------
 
-    # --------------------------------------------------------------------------------
-    # Save benchmark data to CSV
+# --------------------------------------------------------------------------------
+# Save benchmark data to CSV and landscapes to NPY files
     benchmark_df = pd.DataFrame(benchmark_data)
     benchmark_df.to_csv(BENCHMARK_PATH / 'benchmark_data.csv', index=False)
 

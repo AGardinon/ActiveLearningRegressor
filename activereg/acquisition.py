@@ -6,13 +6,36 @@ from scipy.spatial import cKDTree
 from typing import Tuple
 #TODO: make the acquisition functions work without the model instance, make the model instance required in the class
 
-def highest_landscape_selection(landscape: np.ndarray, percentile: int=80):
-    """
-    Select the top percentile of the landscape (distribution) and return
-    their indexes
+def highest_landscape_selection(
+    landscape: np.ndarray, 
+    percentile: int = 80,
+    min_points: int = 50,
+    max_points: int = 500
+    ) -> np.ndarray:
+    """Select the top percentile of the landscape with bounds on number of points.
+
+    Args:
+        landscape (np.ndarray): Input landscape array.
+        percentile (int, optional): Percentile threshold for selection. Defaults to 80.
+        min_points (int, optional): Minimum number of points to select. Defaults to 50.
+        max_points (int, optional): Maximum number of points to select. Defaults to 500.
+
+    Returns:
+        np.ndarray: Indices of the selected points.
     """
     threshold = np.percentile(landscape, percentile)
-    return np.where(landscape >= threshold)[0]
+    indices = np.where(landscape >= threshold)[0]
+    
+    # Adjust if too few/many points
+    if len(indices) < min_points:
+        # Lower threshold to get more points
+        indices = np.argpartition(landscape, -min_points)[-min_points:]
+    elif len(indices) > max_points:
+        # Take top max_points from the selected region
+        top_in_region = np.argpartition(landscape[indices], -max_points)[-max_points:]
+        indices = indices[top_in_region]
+    
+    return indices
 
 
 def penalize_landscape_fast(

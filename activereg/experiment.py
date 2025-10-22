@@ -207,8 +207,7 @@ def sampling_block(
             assert n_points_per_style == 1, "Number of points must be 1 when using maximum_predicted_value acquisition mode."
 
         acqui_func = AcquisitionFunction(y_best=y_best, **acqui_param)
-        _, landscape = acqui_func.landscape_acquisition(X_candidates=X_candidates, ml_model=ml_model)
-        # print(landscape.shape)
+        landscape = acqui_func.landscape_acquisition(X_candidates=X_candidates, ml_model=ml_model)
 
         # skip if acquisition mode is maximum_predicted_value
         if acqui_func.acquisition_mode == 'maximum_predicted_value':
@@ -221,8 +220,8 @@ def sampling_block(
         if penalization_params:
             radius, strength = penalization_params
             penalized_landscape = penalize_landscape_fast(
-                landscape=landscape, 
-                X_candidates=X_candidates, 
+                landscape=landscape,
+                X_candidates=X_candidates,
                 X_train=X_train_copy,
                 radius=radius, strength=strength,
             )

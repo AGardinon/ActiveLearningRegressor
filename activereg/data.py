@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import pandas as pd
 from scipy.stats import qmc
+from sklearn.preprocessing import MinMaxScaler
 
 # TODO: create the DataSampler class to handle all sampling methods and to allow the creation of
 # a training and a validation set for BO/AL loops
@@ -111,7 +112,7 @@ class DatasetGenerator:
         y = f(X_tensor).numpy()
         return y
 
-    def generate_dataset(self, function, n_samples: int, method: str='lhs', val_size: float=0.2, noise_std: float=0.0, negate: bool=False, **kwargs) -> pd.DataFrame:
+    def generate_dataset(self, function, n_samples: int, method: str='lhs', val_size: float=0.2, noise_std: float=0.0, negate: bool=False, scale_y: bool=False, **kwargs) -> pd.DataFrame:
         """Generate a dataset by sampling the input space and computing function values.
 
         Args:
@@ -121,6 +122,7 @@ class DatasetGenerator:
             val_size (float, optional): Proportion of the dataset to include in the validation split. Defaults to 0.2.
             noise_std (float, optional): Standard deviation of the Gaussian noise to add to the output. Defaults to 0.0.
             negate (bool, optional): Whether to negate the function values. Defaults to False.
+            scale_y (bool, optional): Whether to scale the output values to [0, 1] range. Defaults to False.
             **kwargs: Additional keyword arguments to pass to the sampling ('sampling') and function ('function') computation.
 
         Returns:
@@ -131,10 +133,16 @@ class DatasetGenerator:
 
         X_train = self.sample_space(n_samples, method=method, seed=self.seed, **kwargs_sampling)
         y_train = self.compute_function_values(X_train, function, noise_std=noise_std, negate=negate, **kwargs_function)
+        if scale_y:
+            y_scaler = MinMaxScaler()
+            y_train = y_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
 
         if val_size > 0.0:
             X_val = self.sample_space(int(n_samples * val_size), method=method, seed=self.seed+13, **kwargs_sampling)
             y_val = self.compute_function_values(X_val, function, noise_std=noise_std, negate=negate, **kwargs_function)
+            if scale_y:
+                y_scaler = MinMaxScaler()
+                y_val = y_scaler.fit_transform(y_val.reshape(-1, 1)).flatten()
 
         # Add the possibility of handling multi-target outputs in the future
         if len(y_train.shape) > 1:

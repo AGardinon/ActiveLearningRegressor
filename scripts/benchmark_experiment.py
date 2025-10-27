@@ -15,8 +15,10 @@ TODO:
 x Refactor the metric computation into a dedicated function for clarity and reusability.
 
 - Refine the space sampling as the function in high dimensional spaces can be tricky to handle
-due to low density of points in the area to optimize.
+  due to low density of points in the area to optimize.
     - Adaptive LHS sampling to improve POOL coverage
+
+- Remove saving of the landscapes at each cycle to reduce memory usage and disk space.
 '''
 
 import yaml
@@ -109,6 +111,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Read a YAML config file.")
     parser.add_argument("-c", "--config", required=True, help="Path to the YAML configuration file")
     parser.add_argument("-r", "--repetitions", type=int, default=1, help="Number of repetitions for the experiment")
+    parser.add_argument("--rerun", action='store_true', help="Rerun the experiment even if the benchmark folder exists")
     args = parser.parse_args()
 
     with open(args.config, "r") as file:
@@ -140,7 +143,10 @@ if __name__ == '__main__':
     gt_df, evidence_df = get_gt_dataframes(config)
 
     # Create benchmark paths and set up dataframes (pool_df -> complete search space)
-    BENCHMARK_PATH = create_benchmark_path(exp_name=EXP_NAME, overwrite=True)
+    if args.rerun:
+        BENCHMARK_PATH = create_benchmark_path(exp_name=EXP_NAME, overwrite=True)
+    else:
+        BENCHMARK_PATH = create_benchmark_path(exp_name=EXP_NAME, overwrite=False)
 
     # Process the gt dataframe dividing the test from the training set (-> pool dataset)
     pool_df, val_df = process_dataset(gt_df, search_var=SEARCH_VAR, target_var=TARGET_VAR, split_column='set')
@@ -184,15 +190,13 @@ if __name__ == '__main__':
     benchmark_data = []
     # Contains data of all the training points acquired during the experiment with additional metadata
     train_points_data = []
-    # Predefined acquisition modes for tracking the source of acquisition of each point
-    predefined_acquisition_modes = []
 
-    # Arrays to store the predicted and uncertainty landscapes for all repetitions and cycles
-    pool_pred_landscape_array = np.full((N_REPS, N_CYCLES+1, X_pool.shape[0]), np.nan)
-    pool_unc_landscape_array = np.full((N_REPS, N_CYCLES+1, X_pool.shape[0]), np.nan)
+    # # Arrays to store the predicted and uncertainty landscapes for all repetitions and cycles
+    # pool_pred_landscape_array = np.full((N_REPS, N_CYCLES+1, X_pool.shape[0]), np.nan)
+    # pool_unc_landscape_array = np.full((N_REPS, N_CYCLES+1, X_pool.shape[0]), np.nan)
 
-    val_pred_landscape_array = np.full((N_REPS, N_CYCLES+1, X_val.shape[0]), np.nan) if X_val is not None else None
-    val_unc_landscape_array = np.full((N_REPS, N_CYCLES+1, X_val.shape[0]), np.nan) if X_val is not None else None
+    # val_pred_landscape_array = np.full((N_REPS, N_CYCLES+1, X_val.shape[0]), np.nan) if X_val is not None else None
+    # val_unc_landscape_array = np.full((N_REPS, N_CYCLES+1, X_val.shape[0]), np.nan) if X_val is not None else None
 
     # Init the acquisition parameters generator
     acqui_param_gen = AcquisitionParametersGenerator(
@@ -241,6 +245,8 @@ if __name__ == '__main__':
         for cycle in tqdm(range(N_CYCLES), desc=f"Repetition {rep+1}/{N_REPS}"):
 
             # Get the acquisition parameters for the current cycle
+            # Predefined acquisition modes for tracking the source of acquisition of each point
+            predefined_acquisition_modes = []
             cycle_acqui_params = acqui_param_gen.get_params_for_cycle(cycle)
             for acp in cycle_acqui_params:
                 predefined_acquisition_modes.extend([acp['acquisition_mode']] * acp['n_points'])
@@ -262,13 +268,13 @@ if __name__ == '__main__':
                 penalization_params=(pen_radius, pen_strength) if landscape_penalization is not None else None
             )
 
-            # Store the predicted and uncertainty landscapes for the current cycle
-            pool_pred_landscape_array[rep, cycle] = y_pred_pool
-            pool_unc_landscape_array[rep, cycle] = y_unc_pool
+            # # Store the predicted and uncertainty landscapes for the current cycle
+            # pool_pred_landscape_array[rep, cycle] = y_pred_pool
+            # pool_unc_landscape_array[rep, cycle] = y_unc_pool
 
-            if X_val is not None:
-                val_pred_landscape_array[rep, cycle] = y_pred_val
-                val_unc_landscape_array[rep, cycle] = y_unc_val
+            # if X_val is not None:
+            #     val_pred_landscape_array[rep, cycle] = y_pred_val
+            #     val_unc_landscape_array[rep, cycle] = y_unc_val
 
             # Store benchmark data for the current cycle
             cycle_data_dict = {
@@ -309,19 +315,19 @@ if __name__ == '__main__':
         # --------------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------------
-# Save benchmark data to CSV and landscapes to NPY files
+# Save benchmark data to CSV files
     benchmark_df = pd.DataFrame(benchmark_data)
     benchmark_df.to_csv(BENCHMARK_PATH / 'benchmark_data.csv', index=False)
 
     train_points_df = pd.DataFrame(train_points_data)
     train_points_df.to_csv(BENCHMARK_PATH / 'train_points_data.csv', index=False)
 
-    np.save(BENCHMARK_PATH / 'pool_predicted_landscape.npy', pool_pred_landscape_array)
-    np.save(BENCHMARK_PATH / 'pool_uncertainty_landscape.npy', pool_unc_landscape_array)
+    # np.save(BENCHMARK_PATH / 'pool_predicted_landscape.npy', pool_pred_landscape_array)
+    # np.save(BENCHMARK_PATH / 'pool_uncertainty_landscape.npy', pool_unc_landscape_array)
 
-    if X_val is not None:
-        np.save(BENCHMARK_PATH / 'val_predicted_landscape.npy', val_pred_landscape_array)
-        np.save(BENCHMARK_PATH / 'val_uncertainty_landscape.npy', val_unc_landscape_array)
+    # if X_val is not None:
+    #     np.save(BENCHMARK_PATH / 'val_predicted_landscape.npy', val_pred_landscape_array)
+    #     np.save(BENCHMARK_PATH / 'val_uncertainty_landscape.npy', val_unc_landscape_array)
 
 # END of the experiment
 # --------------------------------------------------------------------------------

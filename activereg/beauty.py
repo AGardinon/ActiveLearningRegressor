@@ -107,7 +107,7 @@ def plot_best_value_over_time(
     else:
         ax.set_xlabel('BO Cycle', fontsize=12)
     ax.set_ylabel(f'Best Value ({value_col})', fontsize=12)
-    ax.set_title('Convergence: Best Value Over Time', fontsize=14)
+    ax.set_title('Convergence: Best Value Over Time', fontsize=12)
     ax.legend(fontsize=10, loc=4)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -174,14 +174,14 @@ def plot_simple_regret(
         ax.fill_between(cycles, 
                         np.maximum(mean_regret - std_regret, 1e-10),
                         mean_regret + std_regret, 
-                        alpha=0.3, color=colors[len(ax.lines)-1])
+                        alpha=0.15, color=colors[len(ax.lines)-1])
 
     if total_points is not None:
         ax.set_xlabel('Number of Points Sampled', fontsize=12)
     else:
         ax.set_xlabel('BO Cycle', fontsize=12)
-    ax.set_ylabel('Simple Regret (log scale)', fontsize=12)
-    ax.set_title('Convergence Speed (Lower is Better)', fontsize=14)
+    ax.set_ylabel('Simple Regret', fontsize=12)
+    ax.set_title('Convergence Speed (Lower is Better)', fontsize=12)
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3, which='both')
     fig.tight_layout()
@@ -250,11 +250,11 @@ def plot_sample_efficiency(
         ax.fill_between(common_samples, 
                         mean_values - std_values, 
                         mean_values + std_values, 
-                        alpha=0.3, color=colors[len(ax.lines)-1])
+                        alpha=0.15, color=colors[len(ax.lines)-1])
     
     ax.set_xlabel('Total Samples Collected', fontsize=12)
     ax.set_ylabel(f'Best Value ({value_col})', fontsize=12)
-    ax.set_title('Sample Efficiency: Best Value vs Total Samples', fontsize=14)
+    ax.set_title('Sample Efficiency: Best Value vs Total Samples', fontsize=12)
     ax.legend(fontsize=10, loc=4)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -307,10 +307,10 @@ def plot_time_to_threshold(
     if total_points_ref is not None:
         ax.set_ylim(0, total_points_ref)
         ax.set_ylabel('Points sampled', fontsize=12)
-        ax.set_title('Points to performance thresholds', fontsize=14)
+        ax.set_title('Points to performance thresholds', fontsize=12)
     else:
         ax.set_ylabel('Cycles', fontsize=12)
-        ax.set_title('Cycles to performance thresholds', fontsize=14)
+        ax.set_title('Cycles to performance thresholds', fontsize=12)
 
     if experiment_labels is not None:
         ax.set_xticks(x)
@@ -409,11 +409,11 @@ def plot_batch_diversity_over_time(
         ax.fill_between(normalized_x,
                         mean_div - std_div,
                         mean_div + std_div,
-                        alpha=0.3, color=colors[len(ax.lines)-1])
+                        alpha=0.15, color=colors[len(ax.lines)-1])
     
     ax.set_xlabel('Experiment Completion (%)', fontsize=12)
     ax.set_ylabel('Mean Pairwise Distance in Batch', fontsize=12)
-    ax.set_title('Batch Diversity Over Experiment Progress', fontsize=14)
+    ax.set_title('Batch Diversity Over Experiment Progress', fontsize=12)
     ax.set_xlim([-5, 105])
     ax.legend(fontsize=10, loc='best')
     ax.grid(True, alpha=0.3)
@@ -425,7 +425,8 @@ def analyze_acquisition_source_distribution(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]], 
     experiment_labels: List[str] = None,
     n_ticks: int = 3,
-    figsize: Tuple[float, float] = (3.3, 3)
+    subplotsize: Tuple[float, float] = (3., 3.),
+    n_subplots_cols: int = 3
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Analyze the distribution of acquisition sources over time.
 
@@ -446,12 +447,12 @@ def analyze_acquisition_source_distribution(
         'expected_improvement' : 'EI',
         'target_expected_improvement' : 'TEI',
         'percentage_target_expected_improvement' : '%TEI',
-        'random' : 'Random'
+        'random' : 'RND'
     }
     fig, axes = get_axes(
         len(experiments), 
-        len(experiments) if len(experiments) < 3 else 3, 
-        fig_frame=figsize, res=300)
+        len(experiments) if len(experiments) < n_subplots_cols else n_subplots_cols, 
+        fig_frame=subplotsize, res=300)
     if len(experiments) == 1:
         axes = [axes]
 
@@ -520,7 +521,7 @@ def analyze_acquisition_source_distribution(
         ax.set_xticklabels([str(int(c)) for c in tick_values])
         ax.set_xlabel('BO Cycle', fontsize=10)
         ax.set_ylabel('% of Batch', fontsize=10)
-        ax.set_title(exp_name, fontsize=12, fontweight='bold')
+        ax.set_title(exp_name, fontsize=12)
         ax.legend(fontsize=8, loc='best')
         ax.grid(True, alpha=0.3, axis='y')
         ax.set_ylim([0, 100])
@@ -539,7 +540,8 @@ def plot_model_metrics_over_time(
     total_points: int = None,
     palette: str = 'colorblind',
     experiment_labels: List[str] = None,
-    figsize: Tuple[int, int] = (7, 4)
+    subplotsize: Tuple[int, int] = (7, 4),
+    n_subplots_cols: int = 2
 ) -> Tuple[plt.Figure, List[plt.Axes]]:
     """Plot model metrics over time.
 
@@ -556,8 +558,8 @@ def plot_model_metrics_over_time(
     """
     fig, axes = get_axes(
         len(metrics), 
-        len(metrics) if len(metrics) < 2 else 2, 
-        fig_frame=figsize, res=300)
+        len(metrics) if len(metrics) < n_subplots_cols else n_subplots_cols, 
+        fig_frame=subplotsize, res=300)
     if len(metrics) == 1:
         axes = [axes]
     
@@ -591,7 +593,7 @@ def plot_model_metrics_over_time(
             ax.fill_between(cycles, 
                             mean_curve - std_curve, 
                             mean_curve + std_curve, 
-                            alpha=0.3, color=colors[len(ax.lines)-1])
+                            alpha=0.15, color=colors[len(ax.lines)-1])
         
         if total_points is not None:
             ax.set_xlabel('Number of Points Sampled', fontsize=10)

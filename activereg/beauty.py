@@ -324,7 +324,7 @@ def plot_time_to_threshold(
     fig.tight_layout()
     return fig, ax
 
-# TODO: debug this function
+
 def plot_batch_diversity_over_time(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]], 
     feature_cols: List[str] = ['x1', 'x2', 'x3'],
@@ -420,10 +420,11 @@ def plot_batch_diversity_over_time(
     fig.tight_layout()
     return fig, ax
 
-# TODO: debug this function
+
 def analyze_acquisition_source_distribution(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]], 
     experiment_labels: List[str] = None,
+    palette: str = 'colorblind',
     n_ticks: int = 3,
     subplotsize: Tuple[float, float] = (3., 3.),
     n_subplots_cols: int = 3
@@ -433,6 +434,7 @@ def analyze_acquisition_source_distribution(
     Args:
         experiments (Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]): Dictionary of experiments with their data.
         experiment_labels (List[str], optional): Labels for the experiments. Defaults to None.
+        palette (str, optional): Color palette to use. Defaults to 'colorblind'.
         n_ticks (int, optional): Number of ticks for the x-axis. Defaults to 3.
         figsize (Tuple[float, float], optional): Figure size. Defaults to (3.3, 3).
 
@@ -449,6 +451,11 @@ def analyze_acquisition_source_distribution(
         'percentage_target_expected_improvement' : '%TEI',
         'random' : 'RND'
     }
+
+    # Assign to each source acronym a unique color based on the palette
+    palette_colors = sns.color_palette(palette, n_colors=len(source_acronyms))
+    source_colors = dict(zip(source_acronyms.values(), palette_colors))
+
     fig, axes = get_axes(
         len(experiments), 
         len(experiments) if len(experiments) < n_subplots_cols else n_subplots_cols, 
@@ -507,7 +514,8 @@ def analyze_acquisition_source_distribution(
         
         # Create stacked area plot
         bottom = np.zeros(len(cycles))
-        colors = plt.cm.Set3(np.linspace(0, 1, len(sources)))
+        # Get colors for sources
+        colors = [source_colors[source] for source in sources]
         
         for source, color in zip(sources, colors):
             ax.fill_between(cycles, bottom, bottom + mean_percentages[source], 
@@ -551,7 +559,8 @@ def plot_model_metrics_over_time(
         total_points (int, optional): Total number of points to plot. Defaults to None.
         palette (str, optional): Color palette to use. Defaults to 'colorblind'.
         experiment_labels (List[str], optional): Labels for the experiments. Defaults to None.
-        figsize (Tuple[int, int], optional): Figure size. Defaults to (7, 4).
+        subplotsize (Tuple[int, int], optional): Figure size. Defaults to (7, 4).
+        n_subplots_cols (int, optional): Number of subplot columns. Defaults to 2.
 
     Returns:
         Tuple[plt.Figure, List[plt.Axes]]: The figure and axes objects.
@@ -605,6 +614,235 @@ def plot_model_metrics_over_time(
 
     fig.tight_layout()
     return fig, axes
+
+
+def plot_metric_at_milestones(
+    experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
+    metric: str = 'rmse_vs_gt_val',
+    screened_points: List[int] = [25, 50, 100],
+    palette: str = 'colorblind',
+    figsize: Tuple[int, int] = (12, 6),
+    experiment_labels: List[str] = None,
+    box_width: float = 1.2,
+    group_spacing: float = 1.5,
+    ylabel: str = None,
+    patched_xticks: bool = True,
+) -> Tuple[plt.Figure, plt.Axes]:
+    """Plot a metric at specific milestones across experiments.
+
+    Args:
+        experiments (Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]): The experimental data.
+        metric (str, optional): The metric to plot. Defaults to 'rmse_vs_gt_val'.
+        screened_points (List[int], optional): The milestones to evaluate. Defaults to [25, 50, 100].
+        palette (str, optional): The color palette to use. Defaults to 'colorblind'.
+        figsize (Tuple[int, int], optional): The figure size. Defaults to (12, 6).
+        experiment_labels (List[str], optional): Labels for the experiments. Defaults to None.
+        box_width (float, optional): The width of the boxes in the plot. Defaults to 1.2.
+        group_spacing (float, optional): The spacing between groups of boxes. Defaults to 1.5.
+        ylabel (str, optional): The label for the y-axis. Defaults to None.
+        patched_xticks (bool, optional): Whether to patch the x-ticks. Defaults to True.
+
+    Returns:
+        Tuple[plt.Figure, plt.Axes]: The figure and axes objects.
+    """
+    from matplotlib.patches import Rectangle
+    
+    fig, ax = plt.subplots(figsize=figsize, dpi=300)
+    
+    if experiment_labels is not None:
+        experiments = dict(zip(experiment_labels, experiments.values()))
+
+    exp_names = list(experiments.keys())
+    n_experiments = len(exp_names)
+    n_milestones = len(screened_points)
+    
+    # Colors for different experiments
+    colors = sns.color_palette(palette, n_colors=len(experiments))
+    
+    # Collect data for boxplots
+    # Structure: list of lists, where each inner list is data for one box
+    all_data = []
+    positions = []
+    box_colors = []
+    
+    # Width parameters for visual clarity
+    box_width = box_width / n_experiments  # Width of each box
+    group_spacing = group_spacing  # Space between milestone groups
+
+    for milestone_idx, n_samples in enumerate(screened_points):
+        for exp_idx, exp_name in enumerate(exp_names):
+            points_df, metrics_df = experiments[exp_name]
+            
+            # Collect metric values at this milestone for each repetition
+            milestone_values = []
+            
+            for rep in metrics_df['repetition'].unique():
+                rep_points = points_df[points_df['repetition'] == rep].sort_values('cycle')
+                rep_metrics = metrics_df[metrics_df['repetition'] == rep].sort_values('cycle')
+                
+                # Find the cycle where cumulative samples >= n_samples
+                cumulative_samples = 0
+                target_cycle = None
+                
+                for cycle in sorted(rep_points['cycle'].unique()):
+                    cycle_count = len(rep_points[rep_points['cycle'] <= cycle])
+                    if cycle_count >= n_samples:
+                        target_cycle = cycle
+                        break
+                
+                if target_cycle is not None:
+                    # Get metric value at this cycle
+                    cycle_metric = rep_metrics[rep_metrics['cycle'] == target_cycle]
+                    if len(cycle_metric) > 0:
+                        milestone_values.append(cycle_metric[metric].iloc[0])
+            
+            # Only add if we have data
+            if len(milestone_values) > 0:
+                all_data.append(milestone_values)
+                
+                # Calculate position for this box
+                # Center of milestone group + offset for this experiment
+                group_center = milestone_idx * group_spacing
+                exp_offset = (exp_idx - (n_experiments - 1) / 2) * box_width
+                positions.append(group_center + exp_offset)
+                box_colors.append(colors[exp_idx])
+    
+    # Create boxplots
+    bp = ax.boxplot(all_data, 
+                    positions=positions, 
+                    widths=box_width * 0.9,
+                    patch_artist=True,
+                    showfliers=True,
+                    boxprops=dict(linewidth=1.5),
+                    medianprops=dict(linewidth=1.8, color='darkred', linestyle='-'),
+                    whiskerprops=dict(linewidth=1.5),
+                    capprops=dict(linewidth=1.5),
+                    flierprops=dict(marker='o', markerfacecolor='black', 
+                                    markersize=4, alpha=0.5))
+    
+    # Color the boxes
+    for patch, color in zip(bp['boxes'], box_colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+    
+    # Add subtle background shading for each milestone group
+    if patched_xticks:
+        for milestone_idx in range(n_milestones):
+            group_center = milestone_idx * group_spacing
+            if milestone_idx % 2 == 0:  # Alternate shading
+                rect = Rectangle((group_center - group_spacing/2 + 0.1, ax.get_ylim()[0]),
+                                group_spacing - 0.2, ax.get_ylim()[1] - ax.get_ylim()[0],
+                                facecolor='gray', alpha=0.05, zorder=-1)
+                ax.add_patch(rect)
+    
+    # Set x-axis ticks and labels
+    milestone_positions = [i * group_spacing for i in range(n_milestones)]
+    ax.set_xticks(milestone_positions)
+    ax.set_xticklabels([f'{n}' for n in screened_points], fontsize=10)
+    
+    # Labels and title
+    ax.set_xlabel('Cumulative Samples Screened', fontsize=10)
+    ax.set_ylabel(ylabel or metric.replace('_', ' ').upper(), fontsize=10)
+    # ax.set_title(title or f'{metric.replace("_", " ").title()} at Screening Milestones', fontsize=10)
+
+    # Create custom legend
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor=colors[i], alpha=0.7, label=exp_names[i]) 
+                      for i in range(n_experiments)]
+    ax.legend(handles=legend_elements, loc='best', fontsize=8, framealpha=0.9)
+    
+    # Grid
+    ax.grid(True, alpha=0.3, axis='y', linestyle='--')
+    ax.set_axisbelow(True)
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_metric_at_milestones_with_stats(
+    experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
+    metric: str = 'rmse_vs_gt_val',
+    screened_points: List[int] = [25, 50, 100],
+    palette: str = 'colorblind',
+    figsize: Tuple[int, int] = (12, 6),
+    experiment_labels: List[str] = None,
+    box_width: float = 1.2,
+    group_spacing: float = 1.5,
+    ylabel: str = None,
+    patched_xticks: bool = True,
+    show_pvalues: bool = True
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Plot boxplots with optional statistical significance annotations.
+    Requires scipy for statistical tests.
+    """
+    from scipy import stats
+    
+    # First create the base plot
+    fig, ax = plot_metric_at_milestones(
+        experiments=experiments, metric=metric, screened_points=screened_points, 
+        palette=palette, figsize=figsize, experiment_labels=experiment_labels,
+        box_width=box_width, group_spacing=group_spacing, ylabel=ylabel,
+        patched_xticks=patched_xticks)
+
+    if show_pvalues and len(experiments) == 2:
+        # Only show p-values for pairwise comparison
+        exp_names = list(experiments.keys())
+        
+        for milestone_idx, n_samples in enumerate(screened_points):
+            # Collect data for both experiments at this milestone
+            data_exp1 = []
+            data_exp2 = []
+            
+            for exp_idx, exp_name in enumerate(exp_names):
+                points_df, metrics_df = experiments[exp_name]
+                milestone_values = []
+                
+                for rep in metrics_df['repetition'].unique():
+                    rep_points = points_df[points_df['repetition'] == rep].sort_values('cycle')
+                    rep_metrics = metrics_df[metrics_df['repetition'] == rep].sort_values('cycle')
+                    
+                    cumulative_samples = 0
+                    target_cycle = None
+                    
+                    for cycle in sorted(rep_points['cycle'].unique()):
+                        cycle_count = len(rep_points[rep_points['cycle'] <= cycle])
+                        if cycle_count >= n_samples:
+                            target_cycle = cycle
+                            break
+                    
+                    if target_cycle is not None:
+                        cycle_metric = rep_metrics[rep_metrics['cycle'] == target_cycle]
+                        if len(cycle_metric) > 0:
+                            milestone_values.append(cycle_metric[metric].iloc[0])
+                
+                if exp_idx == 0:
+                    data_exp1 = milestone_values
+                else:
+                    data_exp2 = milestone_values
+            
+            # Perform t-test if both have data
+            if len(data_exp1) > 0 and len(data_exp2) > 0:
+                t_stat, p_value = stats.ttest_ind(data_exp1, data_exp2)
+                
+                # Add significance annotation
+                group_center = milestone_idx * group_spacing
+                y_max = ax.get_ylim()[1]
+                y_pos = y_max * 0.95
+                
+                # Significance stars
+                if p_value < 0.001:
+                    sig_text = '***'
+                elif p_value < 0.01:
+                    sig_text = '**'
+                elif p_value < 0.05:
+                    sig_text = '*'
+                else:
+                    sig_text = 'ns'
+                
+                ax.text(group_center, y_pos, sig_text, 
+                       ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    return fig, ax
 
 # ---------------------------------------------------------------------------
 # --- PLOT UTILITIES

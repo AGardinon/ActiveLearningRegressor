@@ -202,6 +202,18 @@ def sampling_block(
         n_points_per_style = acqui_param['n_points']
         percentile = acqui_param.pop('percentile')
 
+        # if acquisition mode is "random", sample random points and continue
+        if acqui_param['acquisition_mode'] == 'random':
+            random_ndx = np.random.choice(
+                X_candidates_indexes, 
+                size=n_points_per_style, 
+                replace=False
+            )
+            sampled_new_idx += list(random_ndx)
+            landscape_list.append(np.zeros(len(X_candidates)))  # append a zero landscape for consistency
+            X_train_copy = np.concatenate([X_train_copy, X_candidates[random_ndx]])
+            continue
+
         # assert that if the acquisition mode is mpv the number of points is 1
         if acqui_param['acquisition_mode'] == 'maximum_predicted_value':
             assert n_points_per_style == 1, "Number of points must be 1 when using maximum_predicted_value acquisition mode."

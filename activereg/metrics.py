@@ -43,7 +43,7 @@ def evaluate_cycle_metrics(
         "mae_vs_gt_val": mean_absolute_error(y_true=y_true_val, y_pred=y_pred_val) if y_pred_val is not None else np.nan,
         "nll_val": nll_gauss(y_true=y_true_val, y_mean=y_pred_val, y_std=y_uncertainty_val) if (y_pred_val is not None and y_uncertainty_val is not None) else np.nan,
         "picp95_val": picp(y_true=y_true_val, y_mean=y_pred_val, y_std=y_uncertainty_val) if (y_pred_val is not None and y_uncertainty_val is not None) else np.nan,
-        "mpiw95_val": mpiw(y_mean=y_pred_val, y_std=y_uncertainty_val) if (y_pred_val is not None and y_uncertainty_val is not None) else np.nan,
+        "mpiw95_val": mpiw(y_std=y_uncertainty_val) if (y_pred_val is not None and y_uncertainty_val is not None) else np.nan,
     }
 
 # --------------------------------------------------------------------------------
@@ -85,7 +85,7 @@ def picp(y_true: np.ndarray, y_mean: np.ndarray, y_std: np.ndarray, confidence=C
     return np.mean(inside)
 
 
-def mpiw(y_mean: np.ndarray, y_std: np.ndarray, confidence=CONFIDENCE) -> float:
+def mpiw(y_std: np.ndarray, confidence=CONFIDENCE) -> float:
     """Mean Prediction Interval Width (MPIW).
 
     Args:

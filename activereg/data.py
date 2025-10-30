@@ -95,7 +95,7 @@ class DatasetGenerator:
         else:
             raise ValueError(f"Unknown sampling method: {method}.\nAvailable methods: {self.available_methods}")
 
-    def compute_function_values(self, X: np.ndarray, function, noise_std: float=0.0, negate: bool=False, **kwargs) -> np.ndarray:
+    def compute_function_values(self, X: np.ndarray, function, noise_std: float=0.0, negate: bool=False, scale_y: bool=False, **kwargs) -> np.ndarray:
         """Compute function values for the given input samples.
 
         Args:
@@ -110,6 +110,8 @@ class DatasetGenerator:
         X_tensor = torch.tensor(X, dtype=torch.float32)
         f = function(dim=self.n_dimensions, noise_std=noise_std, negate=negate, **kwargs)
         y = f(X_tensor).numpy()
+        if scale_y:
+            y = MinMaxScaler().fit_transform(y.reshape(-1, 1)).flatten()
         return y
 
     def generate_dataset(self, function, n_samples: int, method: str='lhs', val_size: float=0.2, noise_std: float=0.0, negate: bool=False, scale_y: bool=False, **kwargs) -> pd.DataFrame:
@@ -132,17 +134,11 @@ class DatasetGenerator:
         kwargs_function = kwargs.get('function', {})
 
         X_train = self.sample_space(n_samples, method=method, seed=self.seed, **kwargs_sampling)
-        y_train = self.compute_function_values(X_train, function, noise_std=noise_std, negate=negate, **kwargs_function)
-        if scale_y:
-            y_scaler = MinMaxScaler()
-            y_train = y_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
+        y_train = self.compute_function_values(X_train, function, noise_std=noise_std, negate=negate, scale_y=scale_y, **kwargs_function)
 
         if val_size > 0.0:
             X_val = self.sample_space(int(n_samples * val_size), method=method, seed=self.seed+13, **kwargs_sampling)
-            y_val = self.compute_function_values(X_val, function, noise_std=noise_std, negate=negate, **kwargs_function)
-            if scale_y:
-                y_scaler = MinMaxScaler()
-                y_val = y_scaler.fit_transform(y_val.reshape(-1, 1)).flatten()
+            y_val = self.compute_function_values(X_val, function, noise_std=noise_std, negate=negate, scale_y=scale_y, **kwargs_function)
 
         # Add the possibility of handling multi-target outputs in the future
         if len(y_train.shape) > 1:

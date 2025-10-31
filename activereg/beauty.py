@@ -45,6 +45,7 @@ def plot_best_value_over_time(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     true_optimum: float,
     total_points: int = None,
+    y_scaling_value: float = 1.0,
     value_col: str = 'y_best_screened',
     palette: str = 'colorblind',
     experiment_labels: List[str] = None,
@@ -56,6 +57,7 @@ def plot_best_value_over_time(
         experiments (Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]): The experimental data.
         true_optimum (float): The true optimum value.
         total_points (int, optional): The total number of points sampled. Defaults to None.
+        y_scaling_value (float, optional): Scaling factor for the y-axis values. Defaults to 1.0.
         value_col (str, optional): The column name for the best value. Defaults to 'y_best_screened'.
         palette (str, optional): The color palette to use. Defaults to 'colorblind'.
         experiment_labels (List[str], optional): The labels for the experiments. Defaults to None.
@@ -82,6 +84,7 @@ def plot_best_value_over_time(
         
         # Convert to array (repetitions x cycles)
         all_curves = np.array(all_curves)
+        all_curves *= y_scaling_value
         mean_curve = all_curves.mean(axis=0)
         std_curve = all_curves.std(axis=0)
         
@@ -100,7 +103,7 @@ def plot_best_value_over_time(
                         alpha=0.15, color=colors[len(ax.lines)-1], zorder=-1)
 
     if true_optimum is not None:
-        ax.axhline(y=true_optimum, color='.5', linestyle=':', label='Maximum value', zorder=-1)
+        ax.axhline(y=true_optimum, color='.5', linestyle=':', label='Max.', zorder=-1)
     
     if total_points is not None:
         ax.set_xlabel('Number of Points Sampled', fontsize=12)
@@ -118,6 +121,7 @@ def plot_simple_regret(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     true_optimum: float,
     total_points: int = None,
+    y_scaling_value: float = 1.0,
     value_col: str = 'y_best_screened',
     log_scale: bool = False,
     palette: str = 'colorblind',
@@ -130,6 +134,7 @@ def plot_simple_regret(
         experiments (Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]): The experimental data.
         true_optimum (float): The true optimum value.
         total_points (int, optional): The total number of points sampled. Defaults to None.
+        y_scaling_value (float, optional): Scaling factor for the y-axis values. Defaults to 1.0.
         value_col (str, optional): The column name for the best value. Defaults to 'y_best_screened'.
         log_scale (bool, optional): Whether to use a logarithmic scale for the y-axis. Defaults to False.
         palette (str, optional): The color palette to use. Defaults to 'colorblind'.
@@ -140,7 +145,6 @@ def plot_simple_regret(
         Tuple[plt.Figure, plt.Axes]: The figure and axes objects.
     """
     fig, ax = plt.subplots(figsize=figsize, dpi=300)
-
     colors = sns.color_palette(palette, n_colors=len(experiments))
 
     if experiment_labels is not None:
@@ -151,7 +155,7 @@ def plot_simple_regret(
         
         for rep in metrics_df['repetition'].unique():
             rep_data = metrics_df[metrics_df['repetition'] == rep].sort_values('cycle')
-            values = rep_data[value_col].values
+            values = rep_data[value_col].values * y_scaling_value
             regret = true_optimum - values
             # Ensure non-negative and positive for log scale
             regret = np.maximum(regret, 1e-10)
@@ -191,6 +195,7 @@ def plot_simple_regret(
 def plot_sample_efficiency(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]], 
     value_col: str = 'y_best_screened',
+    y_scaling_value: float = 1.0,
     palette: str = 'colorblind',
     experiment_labels: List[str] = None,
     figsize: Tuple[int, int] = (10, 6)
@@ -200,6 +205,7 @@ def plot_sample_efficiency(
     Args:
         experiments (Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]): The experimental data.
         value_col (str, optional): The column name for the best value. Defaults to 'y_best_screened'.
+        y_scaling_value (float, optional): Scaling factor for the y-axis values. Defaults to 1.0.
         palette (str, optional): The color palette to use. Defaults to 'colorblind'.
         experiment_labels (List[str], optional): The labels for the experiments. Defaults to None.
         figsize (Tuple[int, int], optional): The figure size. Defaults to (10, 6).
@@ -227,9 +233,9 @@ def plot_sample_efficiency(
             for cycle in rep_metrics['cycle'].values:
                 n_samples = len(rep_points[rep_points['cycle'] <= cycle])
                 cumulative_samples.append(n_samples)
-            
-            values = rep_metrics[value_col].values
-            
+
+            values = rep_metrics[value_col].values * y_scaling_value
+
             all_curves_samples.append(cumulative_samples)
             all_curves_values.append(values)
         

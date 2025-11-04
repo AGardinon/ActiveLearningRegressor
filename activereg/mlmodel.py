@@ -185,7 +185,7 @@ class GPR:
                 return f"GPR(log_transform={self.log_transform}, gridsearch=True, best_kernel={best_kernel}, trained=True)"
             else:
                 return f"GPR(log_transform={self.log_transform}, gridsearch=False, kernel={self.model.kernel_}, trained=True)"
-        except:
+        except AttributeError:
             return f"GPR(log_transform={self.log_transform}, gridsearch={self.use_gridsearch}, trained=False)"
 
 
@@ -241,6 +241,70 @@ class KernelFactory:
             raise ValueError(f"Invalid kernel definition: {kernel_recipe}")
 
 # - MLP
+# TODO: add device allocation, batch size for training, epochs as a optional parameter in train()
+
+class AnchoredEnsembleMLP:
+    def __init__(
+        self,
+        n_models: int, 
+        in_feats: int,
+        out_feats: int,
+        hidden_layers: List[int] = [64],
+        activation: str = 'relu', 
+        lambda_anchor: float = 1e-4, 
+        lr: float = 1e-3,
+        n_epochs: int = 100
+    ):
+        self.models = []
+        self.optimizers = []
+        self.anchors = []
+        self.lambda_anchor = lambda_anchor
+        self.n_epochs = n_epochs
+        
+        for _ in range(n_models):
+            model = MLP(
+                in_feats=in_feats, 
+                hidden_layers=hidden_layers, 
+                out_feats=out_feats, 
+                activation=activation
+            )
+            # Save anchor (initial params)
+            anchor = [p.detach().clone() for p in model.parameters()]
+            opt = optim.Adam(model.parameters(), lr=lr)
+            
+            self.models.append(model)
+            self.optimizers.append(opt)
+            self.anchors.append(anchor)
+
+    def train(self, X, Y, epochs: Optional[int]=None):
+        num_epochs = self.n_epochs if epochs is None else epochs
+        X, Y = torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(Y, dtype=torch.float32)
+        bar = trange(num_epochs, desc="Training Anchored Ensemble")
+
+        for _ in bar:
+            for model, opt, anchor in zip(self.models, self.optimizers, self.anchors):
+                opt.zero_grad()
+                pred = model(X)
+                mse = torch.mean((pred - Y)**2)
+                
+                # Anchoring penalty
+                anchor_loss = 0.0
+                for p, p0 in zip(model.parameters(), anchor):
+                    anchor_loss += torch.sum((p - p0)**2)
+                loss = mse + self.lambda_anchor * anchor_loss
+                loss.backward()
+                opt.step()
+    
+    def predict(self, X):
+        X = torch.as_tensor(X, dtype=torch.float32)
+        preds = []
+        for model in self.models:
+            preds.append(model(X).detach().numpy())
+        preds = np.stack(preds, axis=0)  # shape (n_models, N, out_dim)
+        mean = preds.mean(axis=0)        # (N, out_dim)
+        std = preds.std(axis=0)          # epistemic uncertainty, (N, out_dim)
+        return preds, mean, std
+    
 
 class MLP(nn.Module):
     def __init__(
@@ -285,66 +349,6 @@ class MLP(nn.Module):
             x = self.activation(layer(x))
         x = self.layers[-1](x)  # output layer without activation (regression)
         return x
-
-
-class AnchoredEnsembleMLP:
-    def __init__(
-        self,
-        n_models: int, 
-        in_feats: int,
-        out_feats: int,
-        hidden_layers: List[int] = [64],
-        activation: str = 'relu', 
-        lambda_anchor: float = 1e-4, 
-        lr: float = 1e-3
-    ):
-        self.models = []
-        self.optimizers = []
-        self.anchors = []
-        self.lambda_anchor = lambda_anchor
-        
-        for _ in range(n_models):
-            model = MLP(
-                in_feats=in_feats, 
-                hidden_layers=hidden_layers, 
-                out_feats=out_feats, 
-                activation=activation
-            )
-            # Save anchor (initial params)
-            anchor = [p.detach().clone() for p in model.parameters()]
-            opt = optim.Adam(model.parameters(), lr=lr)
-            
-            self.models.append(model)
-            self.optimizers.append(opt)
-            self.anchors.append(anchor)
-            
-    def train(self, X, Y, epochs=100):
-        X, Y = torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(Y, dtype=torch.float32)
-        bar = trange(epochs, desc="Training Anchored Ensemble")
-
-        for epoch in bar:
-            for model, opt, anchor in zip(self.models, self.optimizers, self.anchors):
-                opt.zero_grad()
-                pred = model(X)
-                mse = torch.mean((pred - Y)**2)
-                
-                # Anchoring penalty
-                anchor_loss = 0.0
-                for p, p0 in zip(model.parameters(), anchor):
-                    anchor_loss += torch.sum((p - p0)**2)
-                loss = mse + self.lambda_anchor * anchor_loss
-                loss.backward()
-                opt.step()
-    
-    def predict(self, X):
-        X = torch.as_tensor(X, dtype=torch.float32)
-        preds = []
-        for model in self.models:
-            preds.append(model(X).detach().numpy())
-        preds = np.stack(preds, axis=0)  # shape (n_models, N, out_dim)
-        mean = preds.mean(axis=0)        # (N, out_dim)
-        std = preds.std(axis=0)          # epistemic uncertainty, (N, out_dim)
-        return preds, mean, std
 
 
 #  - BAYESIAN NN

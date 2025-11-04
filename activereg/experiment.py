@@ -138,13 +138,22 @@ def setup_ml_model(config: dict) -> regmodels.MLModel:
 
     if ml_model_type == 'GPR':
         return create_gpr_instance(config)
+    elif ml_model_type == 'AnchoredEnsembleMLP':
+        return create_anchored_ensemble_mlp(config)
     else:
         # TODO: add support for additional ML models, eg MLP+Anchoring, BNN
-        raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR'].")
+        raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP'].")
 
 
 def create_gpr_instance(config: dict) -> regmodels.MLModel:
     """Creates a Gaussian Process Regressor instance.
+    Dictionary must contain the following keys:
+    - kernel_recipe (str or list): Recipe for the GP kernel. See `get_gp_kernel` and `KernelFactory` for details.
+    - model_parameters (dict): Additional model parameters for the GPR. Custom implementation of the Sklearn GPR class.
+        - alpha (float): Value added to the diagonal of the kernel matrix during fitting. Default is 1e-10.
+        - optimizer (str or callable): Optimizer to use for kernel hyperparameter optimization. Default is 'fmin_l_bfgs_b'.
+        - n_restarts_optimizer (int): Number of restarts for the optimizer. Default is 0.
+        - normalize_y (bool): Whether to normalize the target values. Default is False
 
     Args:
         config (dict): Configuration dictionary containing model parameters.
@@ -163,6 +172,30 @@ def create_gpr_instance(config: dict) -> regmodels.MLModel:
     # else use the default value from the regmodels.GPR class
 
     return regmodels.GPR(kernel=kernel_recipe, **model_parameters)
+
+
+def create_anchored_ensemble_mlp(config: dict) -> regmodels.MLModel:
+    """Creates an Anchored Ensemble MLP instance.
+    Follows the implementation of a traditional MLP with additional anchoring regularization.
+    Dictionary must contain the following keys:
+    - model_parameters (dict): Additional model parameters for the Anchored Ensemble MLP.
+        - n_models (int): Number of models in the ensemble.
+        - in_feats (int): Number of input features.
+        - out_feats (int): Number of output features.
+        - hidden_layers (list): List of hidden layer sizes. Default is [64].
+        - activation (str): Activation function to use. Default is 'relu'.
+        - lambda_anchor (float): Anchoring regularization strength. Default is 1e-4.
+        - lr (float): Learning rate for training. Default is 1e-3.
+        - n_epochs (int): Number of training epochs. Default is 100.
+
+    Args:
+        config (dict): Configuration dictionary containing model parameters.
+
+    Returns:
+        regmodels.MLModel: The created Anchored Ensemble MLP instance.
+    """
+    model_parameters = config.get('model_parameters', {})
+    return regmodels.AnchoredEnsembleMLP(**model_parameters)
 
 
 def sampling_block(

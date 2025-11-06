@@ -253,8 +253,18 @@ class AnchoredEnsembleMLP:
         activation: str = 'relu', 
         lambda_anchor: float = 1e-4, 
         lr: float = 1e-3,
-        n_epochs: int = 100
+        n_epochs: int = 100,
+        device: str = None
     ):
+
+        self.device = (
+            torch.device(device)
+            if device is not None
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
+
+        self.in_feats = in_feats
+        self.out_feats = out_feats
         self.models = []
         self.optimizers = []
         self.anchors = []
@@ -263,23 +273,25 @@ class AnchoredEnsembleMLP:
         
         for _ in range(n_models):
             model = MLP(
-                in_feats=in_feats, 
+                in_feats=self.in_feats, 
                 hidden_layers=hidden_layers, 
-                out_feats=out_feats, 
+                out_feats=self.out_feats, 
                 activation=activation
-            )
+            ).to(self.device)
+
             # Save anchor (initial params)
-            anchor = [p.detach().clone() for p in model.parameters()]
+            anchor = [p.detach().clone().to(self.device) for p in model.parameters()]
             opt = optim.Adam(model.parameters(), lr=lr)
             
             self.models.append(model)
             self.optimizers.append(opt)
             self.anchors.append(anchor)
 
-    def train(self, X, Y, epochs: Optional[int]=None):
+    def train(self, X, Y, epochs: Optional[int]=None, train_bar: bool=False):
         num_epochs = self.n_epochs if epochs is None else epochs
-        X, Y = torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(Y, dtype=torch.float32)
-        bar = trange(num_epochs, desc="Training Anchored Ensemble")
+        X = torch.as_tensor(X, dtype=torch.float32).to(self.device)
+        Y = torch.as_tensor(Y, dtype=torch.float32).to(self.device)
+        bar = trange(num_epochs, desc="Training Anchored Ensemble") if train_bar else range(num_epochs)
 
         for _ in bar:
             for model, opt, anchor in zip(self.models, self.optimizers, self.anchors):
@@ -295,14 +307,18 @@ class AnchoredEnsembleMLP:
                 loss.backward()
                 opt.step()
     
+    @torch.no_grad()
     def predict(self, X):
-        X = torch.as_tensor(X, dtype=torch.float32)
+        X = torch.as_tensor(X, dtype=torch.float32).to(self.device)
         preds = []
         for model in self.models:
-            preds.append(model(X).detach().numpy())
+            preds.append(model(X).detach().cpu().numpy())
         preds = np.stack(preds, axis=0)  # shape (n_models, N, out_dim)
         mean = preds.mean(axis=0)        # (N, out_dim)
         std = preds.std(axis=0)          # epistemic uncertainty, (N, out_dim)
+        if self.out_feats == 1:
+            mean = mean.squeeze(-1)  # (N,)
+            std = std.squeeze(-1)  # (N,)
         return preds, mean, std
     
 

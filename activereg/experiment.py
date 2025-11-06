@@ -253,6 +253,13 @@ def sampling_block(
 
         acqui_func = AcquisitionFunction(y_best=y_best, **acqui_param)
         landscape = acqui_func.landscape_acquisition(X_candidates=X_candidates, ml_model=ml_model)
+        # check the shape of the landscape and ravel if necessary
+        if len(landscape.shape) > 1 and landscape.shape[1] == 1:
+            landscape = landscape.ravel()
+        elif len(landscape.shape) > 1 and landscape.shape[1] > 1:
+            raise ValueError("Landscape shape is multi dimensional. "
+            "Expected 1D array or 2D array with single column. "
+            "Multi output acquisition functions are not supported.")
 
         # skip if acquisition mode is maximum_predicted_value
         if acqui_func.acquisition_mode == 'maximum_predicted_value':

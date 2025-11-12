@@ -140,9 +140,10 @@ def setup_ml_model(config: dict) -> regmodels.MLModel:
         return create_gpr_instance(config)
     elif ml_model_type == 'AnchoredEnsembleMLP':
         return create_anchored_ensemble_mlp(config)
+    elif ml_model_type == 'BayesianNN':
+        return create_bnn_instance(config)
     else:
-        # TODO: add support for additional ML models, eg MLP+Anchoring, BNN
-        raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP'].")
+        raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP', 'BayesianNN'].")
 
 
 def create_gpr_instance(config: dict) -> regmodels.MLModel:
@@ -196,6 +197,31 @@ def create_anchored_ensemble_mlp(config: dict) -> regmodels.MLModel:
     """
     model_parameters = config.get('model_parameters', {})
     return regmodels.AnchoredEnsembleMLP(**model_parameters)
+
+
+def create_bnn_instance(config: dict) -> regmodels.MLModel:
+    """Creates a Bayesian Neural Network instance.
+    Dictionary must contain the following keys:
+    - model_parameters (dict): Additional model parameters for the BNN.
+        - in_feats (int): Number of input features.
+        - out_feats (int): Number of output features.
+        - hidden_layers (list): List of hidden layer sizes. Default is [32, 32].
+        - activation (str): Activation function to use. Default is 'relu'.
+        - seed (int): Random seed for reproducibility. Default is 42.
+        - lr (float): Learning rate for training. Default is 1e-3.
+        - epochs (int): Number of training epochs. Default is 100.
+        - to_gpu (bool): Whether to use GPU for training. Default is True.
+
+    For more details, see the `regmodels.BayesianNN` class.
+
+    Args:
+        config (dict): Configuration dictionary containing model parameters.
+
+    Returns:
+        regmodels.MLModel: The created Bayesian Neural Network instance.
+    """
+    model_parameters = config.get('model_parameters', {})
+    return regmodels.BayesianNN(**model_parameters)
 
 
 def sampling_block(

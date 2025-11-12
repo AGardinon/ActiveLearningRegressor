@@ -368,6 +368,9 @@ class MLP(nn.Module):
 
 
 #  - BAYESIAN NN
+# TODO: check problem with the dimension of y as (N, 1) gives problems  and (N,) not, but then (N,) is not compatible with the rest
+# of the analysis and/or other models
+# TODO: add output in numpy form not torch
 
 class BayesianNN:
     """
@@ -483,16 +486,17 @@ class BayesianNN:
         self, 
         x: np.ndarray, 
         y: Optional[np.ndarray] = None, 
-        batch_size: int = 64, 
+        batch_size: int = 256, 
         shuffle: bool = True
     ) -> DataLoader:
         """Convert numpy arrays to PyTorch DataLoader."""
         
         # Convert to tensors
-        x_tensor = torch.FloatTensor(x)
+        x_tensor = torch.as_tensor(x, dtype=torch.float32)
         
         if y is not None:
-            y_tensor = torch.FloatTensor(y)
+            y = y.ravel()
+            y_tensor = torch.as_tensor(y, dtype=torch.float32)
             dataset = TensorDataset(x_tensor, y_tensor)
         else:
             dataset = TensorDataset(x_tensor)
@@ -501,36 +505,36 @@ class BayesianNN:
 
     def train(
         self, 
-        x: np.ndarray, 
-        y: np.ndarray, 
+        X: np.ndarray, 
+        Y: np.ndarray, 
         epochs: Optional[int]=None, 
-        batch_size: int=64
+        batch_size: int=256
     ) -> None:
         """
         Train the Bayesian Neural Network.
         
         Args:
-            x: Input features (numpy array)
-            y: Target values (numpy array)
+            X: Input features (numpy array)
+            Y: Target values (numpy array)
             epochs: Number of training epochs (uses self.epochs if None)
             batch_size: Batch size for training
         """
         
         # Apply log transform if specified
         if self.log_transform:
-            y = np.log10(y)
+            Y = np.log10(Y)
         
         # Convert numpy to DataLoader
-        data_loader = self.numpy_to_dataloader(x, y, batch_size=batch_size, shuffle=True)
+        data_loader = self.numpy_to_dataloader(X, Y, batch_size=batch_size, shuffle=True)
         
         # Clear parameter store
         pyro.clear_param_store()
         
         # Training loop
         num_epochs = self.epochs if epochs is None else epochs
-        bar = trange(num_epochs, desc="Training BNN")
+        # bar = trange(num_epochs, desc="Training BNN")
         
-        for epoch in bar:
+        for epoch in range(num_epochs):
             running_loss = 0.0
             n_samples = 0
             
@@ -549,21 +553,21 @@ class BayesianNN:
             self.epoch = epoch + 1
             
             # Update progress bar
-            bar.set_postfix(loss=f'{avg_loss:.4f}')
+            # bar.set_postfix(loss=f'{avg_loss:.4f}')
 
     def predict(
         self, 
-        x: np.ndarray, 
-        num_samples: int=500, 
+        X: np.ndarray, 
+        num_samples: int=20, 
         return_posterior: bool=False, 
-        batch_size: int=64
+        batch_size: int=256
     ) -> Union[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], 
                Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Make predictions with uncertainty quantification.
         
         Args:
-            x: Input features (numpy array)
+            X: Input features (numpy array)
             num_samples: Number of posterior samples
             return_posterior: Whether to return posterior samples
             batch_size: Batch size for prediction
@@ -573,7 +577,7 @@ class BayesianNN:
         """
         
         # Convert numpy to DataLoader
-        data_loader = self.numpy_to_dataloader(x, batch_size=batch_size, shuffle=False)
+        data_loader = self.numpy_to_dataloader(X, batch_size=batch_size, shuffle=False)
         
         # Construct predictive distribution
         predictive = Predictive(
@@ -591,7 +595,7 @@ class BayesianNN:
         
         # Prediction loop
         with torch.no_grad():
-            for batch in tqdm(data_loader, desc='Sampling predictive distribution'):
+            for batch in data_loader:
                 x_batch = batch[0].to(self.device)
                 
                 # Reshape if needed (handle 1D case)
@@ -617,13 +621,13 @@ class BayesianNN:
                 if return_posterior:
                     posterior = torch.cat((posterior, posts.T), 0)
         
-        # Move to CPU for return
-        y_hat_cpu = y_hat.cpu()
-        y_hat_mu_cpu = y_hat_mu.cpu()
-        y_hat_sigma_cpu = y_hat_sigma.cpu()
+        # Move to CPU for return and to numpy
+        y_hat_cpu = y_hat.cpu().numpy()
+        y_hat_mu_cpu = y_hat_mu.cpu().numpy()
+        y_hat_sigma_cpu = y_hat_sigma.cpu().numpy()
         
         if return_posterior:
-            return y_hat_cpu, y_hat_mu_cpu, y_hat_sigma_cpu, posterior.cpu()
+            return y_hat_cpu, y_hat_mu_cpu, y_hat_sigma_cpu, posterior.cpu().numpy()
         
         return y_hat_cpu, y_hat_mu_cpu, y_hat_sigma_cpu
 

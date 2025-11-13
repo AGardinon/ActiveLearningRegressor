@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import activereg.mlmodel as regmodels
+from pathlib import Path
 from sklearn.base import BaseEstimator
 from activereg.format import DATASETS_REPO
 from activereg.sampling import sample_landscape
@@ -14,25 +15,23 @@ from activereg.acquisition import (
 )
 
 
-def get_gt_dataframes(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+def get_gt_dataframes(ground_truth_file: str, experiment_evidence_file: str=None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Gets the ground truth and evidence dataframes from the config.
 
     Args:
-        config (dict): Configuration dictionary containing paths to the dataframes.
+        ground_truth_file (str): Path to the ground truth dataframe file.
+        experiment_evidence_file (str, optional): Path to the experiment evidence dataframe file. Defaults to None.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: Ground truth dataframe and evidence dataframe.
     """
-    gt_df_name = config.get('ground_truth_file', None)
+    gt_df_name = Path(ground_truth_file)
     if gt_df_name is None:
         raise ValueError("Ground truth dataframe name must be provided in the config file.")
     gt_df = pd.read_csv(DATASETS_REPO / gt_df_name)
 
-    exp_evidence_df_name = config.get('experiment_evidence', None)
-    if exp_evidence_df_name is not None:
-        evidence_df = pd.read_csv(DATASETS_REPO / exp_evidence_df_name)
-    else:
-        evidence_df = None
+    exp_evidence_df_name = Path(experiment_evidence_file) if experiment_evidence_file is not None else None
+    evidence_df = pd.read_csv(DATASETS_REPO / exp_evidence_df_name) if exp_evidence_df_name is not None else None
 
     return gt_df, evidence_df
 
@@ -149,8 +148,8 @@ def setup_ml_model(config: dict) -> regmodels.MLModel:
 def create_gpr_instance(config: dict) -> regmodels.MLModel:
     """Creates a Gaussian Process Regressor instance.
     Dictionary must contain the following keys:
-    - kernel_recipe (str or list): Recipe for the GP kernel. See `get_gp_kernel` and `KernelFactory` for details.
     - model_parameters (dict): Additional model parameters for the GPR. Custom implementation of the Sklearn GPR class.
+        - kernel_recipe (str or list): Recipe for the GP kernel. See `get_gp_kernel` and `KernelFactory` for details.
         - alpha (float): Value added to the diagonal of the kernel matrix during fitting. Default is 1e-10.
         - optimizer (str or callable): Optimizer to use for kernel hyperparameter optimization. Default is 'fmin_l_bfgs_b'.
         - n_restarts_optimizer (int): Number of restarts for the optimizer. Default is 0.
@@ -162,7 +161,7 @@ def create_gpr_instance(config: dict) -> regmodels.MLModel:
     Returns:
         regmodels.MLModel: The created Gaussian Process Regressor instance.
     """
-    kernel_recipe = config.get('kernel_recipe', None)
+    kernel_recipe = config.pop('kernel_recipe', None)
     assert kernel_recipe is not None, "Kernel recipe must be specified for GPR in the config file."
 
     kernel_recipe = get_gp_kernel(kernel_recipe)

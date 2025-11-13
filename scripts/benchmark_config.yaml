@@ -1,11 +1,26 @@
 # ------------------------------------------------------------------------------
 # Benchmark configuration file for Active Learning Regressor experiments
 # ------------------------------------------------------------------------------
-experiment_name: "hartmann3d_benchmark_test"
+SEED: 13
+
+experiment_name: "3D/hartmann_gpr_test"
 experiment_notes: "Benchmarking the Hartmann 3D function"
 
-# Path to the ground truth file in the datasets directory
-ground_truth_file: "hartmann3d_lhs.csv"
+# --------------------------------------------------------------
+# Ground truth data configuration
+ground_truth_file: null #"hartmann3d_lhs.csv"
+ground_truth_parameters:
+  function: "hartmann"
+  n_dimensions: 3
+  bounds:
+    - [0, 1]
+    - [0, 1]
+    - [0, 1]
+  n_samples: 50000
+  val_size: 1.0
+  method: "lhs"
+  negate: true
+  noise_std: 0.0
 
 search_space_variables:
   - "x1"
@@ -18,21 +33,22 @@ search_space_variables:
 target_variables:
   - "y"
 
-# Cycles parameters
-init_batch_size: 5
-n_cycles: 5
+data_scaler: "StandardScaler"
+scaler_params: null
 
+# --------------------------------------------------------------
+# Cycles parameters
+n_cycles: 50
+init_batch_size: 2
 init_sampling: "random"
 cycle_sampling: "voronoi"
 
-# ML model configuration (GPR)
-# Kernel configuration for GPR
-# either "RBF_W" or "MATERN_W" or custom recipe
+# --------------------------------------------------------------
+# ML model configuration
 ml_model: "GPR"
-kernel_recipe: "MATERN_W"
 
-# Additional paramters
 model_parameters:
+  kernel_recipe: "MATERN_W"  # for GPR either "RBF_W" or "MATERN_W" or custom recipe
   n_restarts_optimizer: 300
   alpha: 1e-10
   normalize_y: true
@@ -40,16 +56,14 @@ model_parameters:
   use_gridsearch: false
   log_transform: false
 
-data_scaler: "StandardScaler"
-scaler_params:
-
-# List of acquisition parameters functions to be used in the simulation
+# --------------------------------------------------------------
+# Acquisition functions configuration
 acquisition_parameters:
   - acquisition_mode: "expected_improvement"
-    percentile: 90
+    percentile: 95
 
   - acquisition_mode: "target_expected_improvement_800"
-    percentile: 90
+    percentile: 95
     y_target: 800
     epsilon: 150
 
@@ -57,25 +71,39 @@ acquisition_parameters:
     percentile: 'Max'
 
   - acquisition_mode: "target_expected_improvement_1200"
-    percentile: 90
+    percentile: 95
     y_target: 1200
     epsilon: 150
 
   - acquisition_mode: "exploration_mutual_info"
-    percentile: 90
+    percentile: 95
 
   - acquisition_mode: "percentage_target_expected_improvement"
-    percentile: 90
+    percentile: 95
     percentage: 80
 
-landscape_penalization:
-  # radius: 0.25
-  # strength: 1.0
+  - acquisition_mode: "random"
+    percentile: 0
 
-# Define stages with specific acquisition modes and cycle lengths 
+landscape_penalization: null  # radius: 0.25, strength: 1.0
+
+# --------------------------------------------------------------
+# Multi-stage acquisition protocol configuration
 acquisition_protocol:
   stage_1:
-    cycles: 5
-    acquisition_modes: ['exploration_mutual_info', 'percentage_target_expected_improvement', 'expected_improvement']
-    n_points: [2, 1, 2]  # Number of points to acquire for each mode in stage 1
+    cycles: 50
+    acquisition_modes: ['expected_improvement']
+    n_points: [2]  # Number of points to acquire for each mode in stage 1
+  # stage_2:
+  #   cycles: 40
+  #   acquisition_modes: ['expected_improvement']
+  #   n_points: [2]  # Number of points to acquire for each mode in stage 2
+  # stage_3:
+  #   cycles: 10
+  #   acquisition_modes: ['exploration_mutual_info']
+  #   n_points: [2]  # Number of points to acquire for each mode in stage 3
+  # stage_4:
+  #   cycles: 20
+  #   acquisition_modes: ['expected_improvement']
+  #   n_points: [2]  # Number of points to acquire for each mode in stage 4
 

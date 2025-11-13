@@ -1,32 +1,33 @@
 # Experiment configuration for in-silico lab active learning simulation
-experiment_name: "3rep_5c_5pt_mpv_test"
+experiment_name: "ackley3d_20cy_mi_tei_ei"
 experiment_notes: "acqui_func.landscape_acquisition() with penalize landscape and predictiong only on candidates."
 experiment_evidence:
 
 search_space_variables:
   - "x1"
   - "x2"
+  - "x3"
 
 target_variables:
-  - "Number_of_Particles"
+  - "y"
 
 # Cycles parameters
 init_batch_size: 5
-n_cycles: 5
+n_cycles: 19
 
-init_sampling: "fps"
+init_sampling: "voronoi"
 cycle_sampling: "voronoi"
 
 # ML model configuration (GPR)
 # Kernel configuration for GPR
 # either "RBF_W" or "MATERN_W" or custom recipe
 ml_model: "GPR"
-kernel_recipe: "RBF_W"
+kernel_recipe: "MATERN_W"
 
 # Additional paramters
 model_parameters:
   n_restarts_optimizer: 300
-  # alpha: 1e-10
+  alpha: 1e-10
   normalize_y: true
   optimizer: 'fmin_l_bfgs_b'
   use_gridsearch: false
@@ -55,20 +56,20 @@ acquisition_parameters:
   - acquisition_mode: "exploration_mutual_info"
     percentile: 90
 
+  - acquisition_mode: "percentage_target_expected_improvement"
+    percentile: 90
+    percentage: 80
+
 landscape_penalization:
-  radius: 0.25
-  strength: 1.0
+  # radius: 0.25
+  # strength: 1.0
 
 # Define stages with specific acquisition modes and cycle lengths 
 acquisition_protocol:
   stage_1:
-    cycles: 5
-    acquisition_modes: ['exploration_mutual_info', 'maximum_predicted_value']
-    n_points: [4, 1]  # Number of points to acquire for each mode in stage 1
-  stage_2:
-    cycles: 2
-    acquisition_modes: ['target_expected_improvement_800', 'expected_improvement']
-    n_points: [1, 2]
+    cycles: 19
+    acquisition_modes: ['exploration_mutual_info', 'percentage_target_expected_improvement', 'expected_improvement']
+    n_points: [2, 1, 2]  # Number of points to acquire for each mode in stage 1
 
 # Path to the ground truth file in the datasets directory
-ground_truth_file: "gt_number_of_particles_maternw.csv"
+ground_truth_file: "ackley3d_10000pts.csv"

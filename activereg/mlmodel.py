@@ -477,7 +477,7 @@ class BayesianNN:
         self.guide = self.guide.to(self.device)
         
         # Initialize optimizer
-        adam = pyro.optim.Adam({"lr": lr})
+        adam = Adam({"lr": lr})
         
         # Stochastic Variational Inference
         self.svi = SVI(self.model, self.guide, adam, loss=Trace_ELBO())

@@ -4,14 +4,24 @@ import torch
 import numpy as np
 import pandas as pd
 from scipy.stats import qmc
+from scipy.spatial import cKDTree
 from sklearn.preprocessing import MinMaxScaler
 
-# TODO: create the DataSampler class to handle all sampling methods and to allow the creation of
-# a training and a validation set for BO/AL loops
+# --------------------------------------------------------------
+# Dataset generation functions
 
 class DatasetGenerator:
 
-    def __init__(self, n_dimensions: int, bounds: np.ndarray, seed: int=None, dim_labels: list[str]=None, target_label: list[str]=None) -> None:
+    def __init__(
+        self, 
+        n_dimensions: int, 
+        bounds: np.ndarray, 
+        negate: bool=False,
+        scale_y: bool=False,
+        seed: int=None, 
+        dim_labels: list[str]=None, 
+        target_label: list[str]=None
+    ) -> None:
         """Initialize the DatasetGenerator.
 
         Args:
@@ -22,6 +32,8 @@ class DatasetGenerator:
         """
         self.n_dimensions = n_dimensions
         self.bounds = bounds
+        self.negate_y = negate
+        self.scale_y = scale_y
         self.available_methods = ['lhs', 'sobol', 'random']
         self.dimension_names = dim_labels if dim_labels is not None else [f'x{i+1}' for i in range(n_dimensions)]
         self.target_label = target_label if target_label is not None else ['y']
@@ -95,7 +107,7 @@ class DatasetGenerator:
         else:
             raise ValueError(f"Unknown sampling method: {method}.\nAvailable methods: {self.available_methods}")
 
-    def compute_function_values(self, X: np.ndarray, function, noise_std: float=0.0, negate: bool=False, **kwargs) -> np.ndarray:
+    def compute_function_values(self, X: np.ndarray, function, noise_std: float=0.0, **kwargs) -> np.ndarray:
         """Compute function values for the given input samples.
 
         Args:
@@ -108,11 +120,18 @@ class DatasetGenerator:
             np.ndarray: Computed function values of shape (n_samples,).
         """
         X_tensor = torch.tensor(X, dtype=torch.float32)
-        f = function(dim=self.n_dimensions, noise_std=noise_std, negate=negate, **kwargs)
+        f = function(dim=self.n_dimensions, noise_std=noise_std, negate=self.negate_y, **kwargs)
         y = f(X_tensor).numpy()
         return y
 
-    def generate_dataset(self, function, n_samples: int, method: str='lhs', val_size: float=0.2, noise_std: float=0.0, negate: bool=False, scale_y: bool=False, **kwargs) -> pd.DataFrame:
+    def generate_dataset(
+        self, 
+        function, 
+        n_samples: int, 
+        method: str='lhs', 
+        val_size: float=0.2, 
+        noise_std: float=0.0, 
+        **kwargs) -> pd.DataFrame:
         """Generate a dataset by sampling the input space and computing function values.
 
         Args:
@@ -131,16 +150,16 @@ class DatasetGenerator:
         kwargs_sampling = kwargs.get('sampling', {})
         kwargs_function = kwargs.get('function', {})
 
-        X_train = self.sample_space(n_samples, method=method, seed=self.seed, **kwargs_sampling)
-        y_train = self.compute_function_values(X_train, function, noise_std=noise_std, negate=negate, **kwargs_function)
-        if scale_y:
+        X_train = self.sample_space(n_samples, method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=self.seed, **kwargs_sampling)
+        y_train = self.compute_function_values(X_train, function, noise_std=noise_std, **kwargs_function)
+        if self.scale_y:
             y_scaler = MinMaxScaler()
             y_train = y_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
 
         if val_size > 0.0:
-            X_val = self.sample_space(int(n_samples * val_size), method=method, seed=self.seed+13, **kwargs_sampling)
-            y_val = self.compute_function_values(X_val, function, noise_std=noise_std, negate=negate, **kwargs_function)
-            if scale_y:
+            X_val = self.sample_space(int(n_samples * val_size), method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=self.seed+13, **kwargs_sampling)
+            y_val = self.compute_function_values(X_val, function, noise_std=noise_std, **kwargs_function)
+            if self.scale_y:
                 y_scaler = MinMaxScaler()
                 y_val = y_scaler.fit_transform(y_val.reshape(-1, 1)).flatten()
 
@@ -169,7 +188,13 @@ class DatasetGenerator:
         return dataset
 
 
-def lhs_sampling(n_samples: int, n_dimensions: int, bounds: np.ndarray, rounding: list[int]|int=None, seed=None) -> np.ndarray:
+def lhs_sampling(
+    n_samples: int, 
+    n_dimensions: int, 
+    bounds: np.ndarray, 
+    rounding: list[int]|int=None, 
+    seed=None
+) -> np.ndarray:
     """Generate samples using Latin Hypercube Sampling (LHS).
 
     Args:
@@ -199,7 +224,13 @@ def lhs_sampling(n_samples: int, n_dimensions: int, bounds: np.ndarray, rounding
     return scaled_sample
 
 
-def sobol_sampling(n_samples: int, n_dimensions: int, bounds: np.ndarray, rounding: list[int]|int=None, seed=None) -> np.ndarray:
+def sobol_sampling(
+    n_samples: int, 
+    n_dimensions: int, 
+    bounds: np.ndarray, 
+    rounding: list[int]|int=None, 
+    seed=None
+) -> np.ndarray:
     """Generate samples using Sobol sequence.
 
     Args:
@@ -229,7 +260,13 @@ def sobol_sampling(n_samples: int, n_dimensions: int, bounds: np.ndarray, roundi
     return scaled_sample
 
 
-def random_sampling(n_samples: int, n_dimensions: int, bounds: np.ndarray, rounding: list[int]|int=None, seed=None) -> np.ndarray:
+def random_sampling(
+    n_samples: int, 
+    n_dimensions: int, 
+    bounds: np.ndarray, 
+    rounding: list[int]|int=None, 
+    seed=None
+) -> np.ndarray:
     """Generate samples using random uniform sampling.
 
     Args:
@@ -259,3 +296,143 @@ def random_sampling(n_samples: int, n_dimensions: int, bounds: np.ndarray, round
             samples[:, dim] = np.round(samples[:, dim], round_val)
 
     return samples
+
+
+# --------------------------------------------------------------
+# Adaptive refinement functions
+
+
+def compute_reference_distance(
+    X: np.ndarray,
+    method: str = "median_nn",
+    gp_lengthscale: np.ndarray = None
+) -> float:
+    """
+    Compute a reference distance scale for threshold setting.
+
+    Args:
+        X_train: (N, d) array of existing training points (can be candidates too).
+        method: "median_nn" | "mean_nn" | "gp_lengthscale"
+        gp_lengthscale: None or scalar or (d,) array of kernel lengthscales.
+
+    Returns:
+        ref: scalar reference distance (or geometric mean of lengthscales if gp_lengthscale provided)
+    """
+    if X is None or len(X) < 2:
+        # fallback: use 1.0
+        if gp_lengthscale is not None:
+            ls = np.asarray(gp_lengthscale)
+            return float(np.exp(np.mean(np.log(np.abs(ls) + 1e-12))))
+        return 1.0
+
+    if method in ("median_nn", "mean_nn"):
+        tree = cKDTree(X)
+        # query k=2 because first neighbor is the point itself
+        dists, _ = tree.query(X, k=2)
+        # dists[:,0] is zero (self), dists[:,1] is nearest neighbor
+        nn = dists[:, 1]
+        if method == "median_nn":
+            return float(np.median(nn))
+        else:
+            return float(np.mean(nn))
+        
+    elif method == "gp_lengthscale":
+        if gp_lengthscale is None:
+            raise ValueError("gp_lengthscale must be provided for method 'gp_lengthscale'")
+        ls = np.asarray(gp_lengthscale)
+        # convert per-dim lengthscales to a scalar reference, use geometric mean
+        return float(np.exp(np.mean(np.log(np.abs(ls) + 1e-12))))
+    else:
+        raise ValueError(f"Unknown method {method}")
+    
+
+def pointwise_hypercube_refinement(
+    refine_generator: DatasetGenerator,
+    design_bounds: np.ndarray,
+    design_dimensions: int,
+    refine_centroid: np.ndarray, 
+    half_side_length: float, 
+    n_points: int,
+    refine_noise_std: float,
+    scaler,
+    refine_function,
+    refine_method: str = 'lhs'
+) -> pd.DataFrame:
+    """Generate new candidate points within a hypercube centered at a given centroid.
+
+    Args:
+        refine_generator (DatasetGenerator): DatasetGenerator instance for generating points.
+        refine_centroid (np.ndarray): Centroid of the hypercube (array of shape (1, n_dimensions) in the reduced space).
+        half_side_length (float): Half the length of the hypercube's side.
+        n_points (int): Number of points to generate within the hypercube.
+        refine_noise_std (float): Standard deviation of noise to add to the function evaluations.
+        scaler (_type_): Scaler used to inverse transform the hypercube bounds.
+        refine_function (_type_): Function to evaluate at the generated points.
+        refine_method (str, optional): Sampling method to generate points within the hypercube. Defaults to 'lhs'.
+
+    Returns:
+        pd.DataFrame: DataFrame containing the generated points and their evaluations.
+    """    
+    assert refine_centroid.shape == (1, design_dimensions), "refine_centroid must be of shape (1, n_dimensions)"
+
+    # Inverse transform the centroid to the original space
+    refine_centroid_orig = scaler.inverse_transform(refine_centroid)
+    
+    # Scale the half_side_length to each dimension based on the scaler
+    half_side_length_dimwise = half_side_length * scaler.scale_
+
+    # Define the hypercube bounds in the original space, centered at the refine_centroid
+    hyper_cube_bounds = np.zeros((design_dimensions, 2))
+    for d in range(design_dimensions):
+        low = refine_centroid_orig[0, d] - half_side_length_dimwise[d]
+        high = refine_centroid_orig[0, d] + half_side_length_dimwise[d]
+
+        # clip within design space
+        low = max(low, design_bounds[d, 0])
+        high = min(high, design_bounds[d, 1])
+
+        hyper_cube_bounds[d] = [low, high]
+
+    # Generate n_points random samples within the hypercube in the original space
+    refine_generator.set_bounds = hyper_cube_bounds
+
+    # Generate the refinement dataframe containing a train and validation set
+    refined_df = refine_generator.generate_dataset(
+        function=refine_function,
+        n_samples=n_points,
+        method=refine_method,
+        val_size=1.0,
+        noise_std=refine_noise_std,
+    )
+
+    return refined_df
+
+
+# TODO: possibility to used adaptive min_distance based on points-to-keep thresholding
+def filter_refined_additions(
+    X_addition: np.ndarray,
+    X_existing: np.ndarray,
+    min_distance: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Filter out points from X_addition that are too close to the X_existing points and 
+    return the filtered points with the indices of the points that were kept.
+
+    Args:
+        X_addition (np.ndarray): Points proposed for addition.
+        X_existing (np.ndarray): Existing points to compare against.
+        min_distance (float): Minimum allowable distance from existing points.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Filtered points and their indices.
+    """
+    tree = cKDTree(X_existing)
+    filtered_points = []
+    filtered_indices = []
+
+    for idx, point in enumerate(X_addition):
+        dist, _ = tree.query(point, k=1)
+        if dist >= min_distance:
+            filtered_points.append(point)
+            filtered_indices.append(idx)
+
+    return np.array(filtered_points), np.array(filtered_indices)

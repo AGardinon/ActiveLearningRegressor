@@ -125,6 +125,9 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
 
 def setup_ml_model(config: dict) -> regmodels.MLModel:
     """Sets up the machine learning model based on the configuration.
+    The configuration dictionary must contain the following keys:
+        - ml_model (str): Type of machine learning model ('GPR', 'AnchoredEnsembleMLP', 'BayesianNN').
+        - model_parameters (dict): Parameters specific to the chosen model.
 
     Args:
         config (dict): Configuration dictionary containing model parameters.
@@ -133,22 +136,22 @@ def setup_ml_model(config: dict) -> regmodels.MLModel:
         regmodels.MLModel: The configured machine learning model.
     """
     ml_model_type = config.get('ml_model', None)
+    ml_model_params = config.get('model_parameters', {})
     assert ml_model_type is not None, "ML model type must be specified in the config file."
 
     if ml_model_type == 'GPR':
-        return create_gpr_instance(config)
+        return create_gpr_instance(ml_model_params)
     elif ml_model_type == 'AnchoredEnsembleMLP':
-        return create_anchored_ensemble_mlp(config)
+        return create_anchored_ensemble_mlp(ml_model_params)
     elif ml_model_type == 'BayesianNN':
-        return create_bnn_instance(config)
+        return create_bnn_instance(ml_model_params)
     else:
         raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP', 'BayesianNN'].")
 
 
-def create_gpr_instance(config: dict) -> regmodels.MLModel:
+def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:
     """Creates a Gaussian Process Regressor instance.
     Dictionary must contain the following keys:
-    - model_parameters (dict): Additional model parameters for the GPR. Custom implementation of the Sklearn GPR class.
         - kernel_recipe (str or list): Recipe for the GP kernel. See `get_gp_kernel` and `KernelFactory` for details.
         - alpha (float): Value added to the diagonal of the kernel matrix during fitting. Default is 1e-10.
         - optimizer (str or callable): Optimizer to use for kernel hyperparameter optimization. Default is 'fmin_l_bfgs_b'.
@@ -156,17 +159,16 @@ def create_gpr_instance(config: dict) -> regmodels.MLModel:
         - normalize_y (bool): Whether to normalize the target values. Default is False
 
     Args:
-        config (dict): Configuration dictionary containing model parameters.
+        model_parameters (dict): Configuration dictionary containing model parameters.
 
     Returns:
         regmodels.MLModel: The created Gaussian Process Regressor instance.
     """
-    kernel_recipe = config.pop('kernel_recipe', None)
+    kernel_recipe = model_parameters.pop('kernel_recipe', None)
     assert kernel_recipe is not None, "Kernel recipe must be specified for GPR in the config file."
 
     kernel_recipe = get_gp_kernel(kernel_recipe)
 
-    model_parameters = config.get('model_parameters', {})
     if 'alpha' in model_parameters:
         model_parameters['alpha'] = float(model_parameters['alpha'])
     # else use the default value from the regmodels.GPR class
@@ -174,11 +176,10 @@ def create_gpr_instance(config: dict) -> regmodels.MLModel:
     return regmodels.GPR(kernel=kernel_recipe, **model_parameters)
 
 
-def create_anchored_ensemble_mlp(config: dict) -> regmodels.MLModel:
+def create_anchored_ensemble_mlp(model_parameters: dict) -> regmodels.MLModel:
     """Creates an Anchored Ensemble MLP instance.
     Follows the implementation of a traditional MLP with additional anchoring regularization.
     Dictionary must contain the following keys:
-    - model_parameters (dict): Additional model parameters for the Anchored Ensemble MLP.
         - n_models (int): Number of models in the ensemble.
         - in_feats (int): Number of input features.
         - out_feats (int): Number of output features.
@@ -194,14 +195,12 @@ def create_anchored_ensemble_mlp(config: dict) -> regmodels.MLModel:
     Returns:
         regmodels.MLModel: The created Anchored Ensemble MLP instance.
     """
-    model_parameters = config.get('model_parameters', {})
     return regmodels.AnchoredEnsembleMLP(**model_parameters)
 
 
-def create_bnn_instance(config: dict) -> regmodels.MLModel:
+def create_bnn_instance(model_parameters: dict) -> regmodels.MLModel:
     """Creates a Bayesian Neural Network instance.
     Dictionary must contain the following keys:
-    - model_parameters (dict): Additional model parameters for the BNN.
         - in_feats (int): Number of input features.
         - out_feats (int): Number of output features.
         - hidden_layers (list): List of hidden layer sizes. Default is [32, 32].
@@ -214,12 +213,11 @@ def create_bnn_instance(config: dict) -> regmodels.MLModel:
     For more details, see the `regmodels.BayesianNN` class.
 
     Args:
-        config (dict): Configuration dictionary containing model parameters.
+        model_parameters (dict): Configuration dictionary containing model parameters.
 
     Returns:
         regmodels.MLModel: The created Bayesian Neural Network instance.
     """
-    model_parameters = config.get('model_parameters', {})
     return regmodels.BayesianNN(**model_parameters)
 
 

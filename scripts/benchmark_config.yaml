@@ -3,38 +3,65 @@
 # ------------------------------------------------------------------------------
 SEED: 13
 
-experiment_name: "3D/hartmann_gpr_test"
-experiment_notes: "Benchmarking the Hartmann 3D function"
+experiment_name: "6D/ackley_gpr_refinement_test"
+experiment_notes: "Benchmarking the Ackley 6D function"
 
 # --------------------------------------------------------------
 # Ground truth data configuration
-ground_truth_file: null #"hartmann3d_lhs.csv"
+ground_truth_file: null #"ackley6d_lhs.csv"
 ground_truth_parameters:
-  function: "hartmann"
-  n_dimensions: 3
+  function: "Ackley"
+  n_dimensions: 6
   bounds:
-    - [0, 1]
-    - [0, 1]
-    - [0, 1]
-  n_samples: 50000
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+  n_samples: 10000
   val_size: 1.0
   method: "lhs"
   negate: true
+  scale_y: false
   noise_std: 0.0
 
 search_space_variables:
   - "x1"
   - "x2"
   - "x3"
-  # - "x4"
-  # - "x5"
-  # - "x6"
+  - "x4"
+  - "x5"
+  - "x6"
 
 target_variables:
   - "y"
 
+# --------------------------------------------------------------
+# Data scaling configuration
 data_scaler: "StandardScaler"
 scaler_params: null
+
+# --------------------------------------------------------------
+# Adaptive refinement configuration
+adaptive_refinement:
+  function: "Ackley"
+  n_dimensions: 6
+  bounds:
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+    - [-32.768, 32.768]
+  method: 'lhs'
+  negate: true
+  scale_y: false
+  refinement_noise_std: 0.0
+  refinement_step: 20  # number of points acquired after which to perform refinement
+  refinement_centroids: 10  # number of centroids to use for the refinement (chosen via fps)
+  refinement_batch_size: 100  # number of points to sample around each centroid during refinement
+  centroids_selection_method: "fps"  # "voronoi" or "fps" (farthest point sampling)
 
 # --------------------------------------------------------------
 # Cycles parameters

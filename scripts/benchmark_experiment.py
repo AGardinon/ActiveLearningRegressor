@@ -30,7 +30,10 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-from activereg.data import DatasetGenerator
+from activereg.data import (DatasetGenerator,
+                            compute_reference_distance,
+                            pointwise_hypercube_refinement,
+                            filter_refined_additions)
 from activereg.metrics import evaluate_cycle_metrics
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
@@ -187,7 +190,9 @@ if __name__ == '__main__':
 
         function_name = gt_config.pop('function', None)
         function_dim = gt_config.pop('n_dimensions', 3)
-        function_bounds = gt_config.pop('bounds', [[0, 1]] * function_dim)
+        function_bounds = np.array(gt_config.pop('bounds', [[0, 1]] * function_dim))
+        function_negate = gt_config.pop('negate', False)
+        function_scale_y = gt_config.pop('scale_y', False)
 
         if function_name not in FUNCTIONS_DICT:
             raise ValueError(f"Function '{function_name}' is not defined. Choose from {list(FUNCTIONS_DICT.keys())}.")
@@ -196,6 +201,8 @@ if __name__ == '__main__':
         dataset_generator = DatasetGenerator(
             n_dimensions=function_dim,
             bounds=function_bounds,
+            negate=function_negate,
+            scale_y=function_scale_y,
             seed=seed
         )
         
@@ -206,6 +213,11 @@ if __name__ == '__main__':
             **gt_config
         )
         evidence_df = None
+        print(f"Synthetic ground truth dataset generated using the {function_name} function in {function_dim}D.")
+
+        # Save the generated ground truth dataset for reference
+        gt_save_path = BENCHMARK_PATH / 'ground_truth_dataset.csv'
+        gt_df.to_csv(gt_save_path, index=False)
     # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
@@ -220,7 +232,7 @@ if __name__ == '__main__':
     # Set up and apply the data scaler on the complete search space
     data_scaler = data_scaler_setup(config)
     X_pool, data_scaler = setup_data_pool(df=pool_df, search_var=SEARCH_VAR, scaler=data_scaler)
-    
+    X_pool_reference_distance = compute_reference_distance(X=X_pool, method="median_nn")
     joblib.dump(data_scaler, scaler_path)
 
     # Create candidates dataframe (candidates_df -> unscreened space)
@@ -244,9 +256,56 @@ if __name__ == '__main__':
         pen_strength = landscape_penalization.get('strength', None)
         print(f"Landscape penalization activated with radius {pen_radius} and strength {pen_strength}.")
 
-    # TODO
+    # --------------------------------------------------------------------------------
+    # ADAPTIVE REFINEMENT SETUP
     # Set up the space refinement sampler
-    adaptive_refinement = config.get('adaptive_refinement', None)
+    refinement_config = config.get('adaptive_refinement', None)
+    if refinement_config is not None:
+        refine_function_name = refinement_config.get('function', None)
+        refine_function_dim = refinement_config.get('n_dimensions', None)
+        refine_function_bounds = np.array(refinement_config.get('bounds', [[0, 1]] * refine_function_dim))
+        refine_method = refinement_config.get('method', 'lhs')
+        refine_noise_std = refinement_config.get('refinement_noise_std', 0.0)
+        refine_function_negate = refinement_config.get('negate', False)
+        refine_function_scale_y = refinement_config.get('scale_y', False)
+
+        if gt_file is None:
+            assert refine_function_name == function_name, "Refinement function must be the same as the defined ground truth function."
+            assert refine_function_dim == function_dim, "Refinement function dimension must be the same as the defined ground truth function."
+            
+            assert refine_function_negate == function_negate, "Refinement function negate parameter must be the same as the defined ground truth function."
+            assert refine_function_scale_y == function_scale_y, "Refinement function scale_y parameter must be the same as the defined ground truth function."
+
+        elif gt_file is not None:
+            print(f"Adaptive refinement is set with negate={refine_function_negate} and scale_y={refine_function_scale_y}. "
+                  f"Check that these parameters are consistent with the ground truth function settings.")
+            if refine_function_name not in FUNCTIONS_DICT:
+                raise ValueError(f"Refinement function '{refine_function_name}' is not defined. Choose from {list(FUNCTIONS_DICT.keys())}.")
+
+        refine_generator = DatasetGenerator(
+            n_dimensions=refine_function_dim,
+            bounds=refine_function_bounds,
+            negate=refine_function_negate,
+            scale_y=refine_function_scale_y,
+            seed=seed
+        )
+
+        refine_function = FUNCTIONS_DICT[refine_function_name]
+        refine_step = refinement_config.get('refinement_step', 20)
+        refine_centroids = refinement_config.get('refinement_centroids', 5)
+        refine_batch_size = refinement_config.get('refinement_batch_size', 100)
+        refine_counter = 0
+        next_refine_target = refine_step
+        centroids_selection_method = refinement_config.get('centroids_selection_method', 'fps')
+
+        print(f"Adaptive refinement activated every {refine_step} points acquired, "
+              f"with {refine_centroids} centroids and adding {refine_batch_size} points per centroids.")
+        
+        # DataFrame to collect all refinement points added during the experiment (for output purposes)
+        collective_refinement_df = pd.DataFrame()
+
+    else:
+        refine_generator = None
 
     # --------------------------------------------------------------------------------
     # RUN THE BENCHMARK EXPERIMENT
@@ -378,29 +437,105 @@ if __name__ == '__main__':
 
             # --------------------------------------------------------------------------------
             # Adaptive refinement of candidates pool if defined in the config file
-            if adaptive_refinement is not None:
-                refinement_sampling = adaptive_refinement.get('sampling_mode', 'lhs')
+            if refine_generator is not None:
 
-                # use as base the sampled points of the cycle to refine around them
-                # using X_train as candidates are updated after sampling deleating the sampled points
-                X_refinement_base = X_train[-len(sampled_indexes):]
+                # TODO: check for possible inconsistencies in the countig of acquired points
+                n_points_acquired = (cycle + 1) * sum([acp['n_points'] for acp in cycle_acqui_params]) + (INIT_BATCH if evidence_df is None else 0)
+                if n_points_acquired >= next_refine_target:
+                    refine_counter += 1
 
-                # TODO
+                    # Compute the reference distance on the training set and determine the half–side-length of the hypercube
+                    nn_ref_distance = compute_reference_distance(X=X_train, method="median_nn")
+                    half_side_hyperc_length = nn_ref_distance
 
-                # if n_new_candidates > 0:
-                #     new_candidates_indexes = sample_landscape(
-                #         X_landscape=X_pool,
-                #         n_points=n_new_candidates,
-                #         sampling_mode=refinement_sampling,
-                #         exclude_X=X_train
-                #     )
+                    # Accumulate the seed (size of refine_step) of the refinement points from the train set acquired so far
+                    # TODO: used the highest region in the predicted landscape as seed for the refinement
+                    X_seed_refinement = X_train[-refine_step:]
 
-                #     new_X_candidates = X_pool[new_candidates_indexes]
-                #     new_y_candidates = pool_target_landscape[new_candidates_indexes]
+                    # Compress the seed points to just the centroids via Farthest Point Sampling (FPS)
+                    centroids_ndx = sample_landscape(
+                        X_landscape=X_seed_refinement,
+                        n_points=refine_centroids,
+                        sampling_mode=centroids_selection_method
+                    )
+                    X_centroids_refinement = X_seed_refinement[centroids_ndx]
 
-                #     # Append new candidates to the existing candidates pool
-                #     X_candidates = np.vstack((X_candidates, new_X_candidates))
-                #     y_candidates = np.concatenate((y_candidates, new_y_candidates))
+                    # Generate new candidates around each centroid
+                    refined_df = pd.DataFrame()
+                    for centroid in X_centroids_refinement:
+                        refinement_df = pointwise_hypercube_refinement(
+                            refine_generator=refine_generator,
+                            design_bounds=refine_function_bounds,
+                            design_dimensions=refine_function_dim,
+                            refine_centroid=np.reshape(centroid, (1, -1)),  # reshape to (1, D)
+                            half_side_length=half_side_hyperc_length,
+                            n_points=refine_batch_size,
+                            refine_noise_std=refine_noise_std,
+                            scaler=data_scaler,
+                            refine_function=refine_function,
+                            refine_method=refine_method
+                        )
+                        # CAREFUL: the refinement_df is in the original space (unscaled)
+                        refined_df = pd.concat([refined_df, refinement_df], ignore_index=True)
+
+                    # Separate refined_pool and refined_validation sets
+                    # a) Pool set
+                    X_pool_refined = refined_df[refined_df['set'] == 'train'][SEARCH_VAR].to_numpy()
+                    X_refined_scaled = data_scaler.transform(X_pool_refined)
+                    y_pool_refined = refined_df[refined_df['set'] == 'train'][TARGET_VAR].to_numpy()
+
+                    # Filter out already existing points in the candidates pool
+                    # TODO: make the min distance scaling parameter configurable
+                    X_pool_refined_filtered, filtered_indexes = filter_refined_additions(
+                        X_addition=X_refined_scaled,
+                        X_existing=X_pool,
+                        min_distance=X_pool_reference_distance * 0.3
+                    )
+                    y_refined_filtered = y_pool_refined[filtered_indexes]
+
+                    # Append the refined and filtered points to the candidates pool
+                    X_candidates = np.vstack((X_candidates, X_pool_refined_filtered))
+                    y_candidates = np.concatenate((y_candidates, y_refined_filtered))
+
+                    # Append the refined and filtered points to the pool set
+                    # Careful: the target from the pool (and validation) set are (Npoints, ) shaped arrays
+                    X_pool = np.vstack((X_pool, X_pool_refined_filtered))
+                    pool_target_landscape = np.concatenate((pool_target_landscape, y_refined_filtered.ravel()))
+
+                    # b) Validation set
+                    if not val_df.empty:
+                        X_val_refined = refined_df[refined_df['set'] == 'val'][SEARCH_VAR].to_numpy()
+                        X_val_refined_scaled = data_scaler.transform(X_val_refined)
+                        y_val_refined = refined_df[refined_df['set'] == 'val'][TARGET_VAR].to_numpy()
+
+                        X_val_refined_filtered, val_filtered_indexes = filter_refined_additions(
+                            X_addition=X_val_refined_scaled,
+                            X_existing=X_val,
+                            min_distance=X_pool_reference_distance
+                        )
+                        y_val_refined_filtered = y_val_refined[val_filtered_indexes]
+
+                        # Append the refined and filtered points to the validation set
+                        X_val = np.vstack((X_val, X_val_refined_filtered))
+                        val_target_landscape = np.concatenate((val_target_landscape, y_val_refined_filtered.ravel()))
+
+                    # Update the next refinement target
+                    print(f"-> Adaptive refinement step {refine_counter} at {n_points_acquired} points acquired, "
+                          f"added {len(y_refined_filtered)}/{refine_centroids*refine_batch_size} points.")
+                    
+                    # Collect all refinement points added during the experiment
+                    # Add a column to identify the refinement step
+                    refined_df['refinement_step'] = [refine_counter] * len(refined_df)
+                    # TODO: Keep only the filtered points added to the pool/validation sets
+                    # refined_df = refined_df.iloc[filtered_indexes]
+                    collective_refinement_df = pd.concat([collective_refinement_df, refined_df], ignore_index=True)
+                    collective_refinement_save_path = BENCHMARK_PATH / f'collective_refinement_points_rep{rep+1}.csv'
+                    collective_refinement_df.to_csv(collective_refinement_save_path, index=False)
+
+                    next_refine_target += refine_step
+
+            # END of Adaptive refinement
+            # --------------------------------------------------------------------------------
 
         # END of repetition
         # --------------------------------------------------------------------------------

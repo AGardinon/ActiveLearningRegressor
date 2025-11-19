@@ -10,6 +10,8 @@ from sklearn.preprocessing import MinMaxScaler
 # --------------------------------------------------------------
 # Dataset generation functions
 
+# TODO: remove y_scaling as it might lead to errors in the overall process and in the refinement steps
+
 class DatasetGenerator:
 
     def __init__(
@@ -17,7 +19,6 @@ class DatasetGenerator:
         n_dimensions: int, 
         bounds: np.ndarray, 
         negate: bool=False,
-        scale_y: bool=False,
         seed: int=None, 
         dim_labels: list[str]=None, 
         target_label: list[str]=None
@@ -33,7 +34,6 @@ class DatasetGenerator:
         self.n_dimensions = n_dimensions
         self.bounds = bounds
         self.negate_y = negate
-        self.scale_y = scale_y
         self.available_methods = ['lhs', 'sobol', 'random']
         self.dimension_names = dim_labels if dim_labels is not None else [f'x{i+1}' for i in range(n_dimensions)]
         self.target_label = target_label if target_label is not None else ['y']
@@ -114,7 +114,6 @@ class DatasetGenerator:
             X (np.ndarray): Input samples of shape (n_samples, n_dimensions).
             function (_type_): Function to compute the output values.
             noise_std (float, optional): Standard deviation of the Gaussian noise to add to the output
-            negate (bool, optional): Whether to negate the function values. Defaults to False.
             **kwargs: Additional keyword arguments to pass to the function.
         Returns:
             np.ndarray: Computed function values of shape (n_samples,).
@@ -140,8 +139,6 @@ class DatasetGenerator:
             method (str, optional): Sampling method to use. Defaults to 'lhs'.
             val_size (float, optional): Proportion of the dataset to include in the validation split. Defaults to 0.2.
             noise_std (float, optional): Standard deviation of the Gaussian noise to add to the output. Defaults to 0.0.
-            negate (bool, optional): Whether to negate the function values. Defaults to False.
-            scale_y (bool, optional): Whether to scale the output values to [0, 1] range. Defaults to False.
             **kwargs: Additional keyword arguments to pass to the sampling ('sampling') and function ('function') computation.
 
         Returns:
@@ -152,16 +149,10 @@ class DatasetGenerator:
 
         X_train = self.sample_space(n_samples, method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=self.seed, **kwargs_sampling)
         y_train = self.compute_function_values(X_train, function, noise_std=noise_std, **kwargs_function)
-        if self.scale_y:
-            y_scaler = MinMaxScaler()
-            y_train = y_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
 
         if val_size > 0.0:
             X_val = self.sample_space(int(n_samples * val_size), method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=self.seed+13, **kwargs_sampling)
             y_val = self.compute_function_values(X_val, function, noise_std=noise_std, **kwargs_function)
-            if self.scale_y:
-                y_scaler = MinMaxScaler()
-                y_val = y_scaler.fit_transform(y_val.reshape(-1, 1)).flatten()
 
         # Add the possibility of handling multi-target outputs in the future
         if len(y_train.shape) > 1:

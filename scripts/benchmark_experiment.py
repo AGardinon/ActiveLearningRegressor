@@ -37,6 +37,7 @@ from activereg.data import (DatasetGenerator,
 from activereg.metrics import evaluate_cycle_metrics
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
+from activereg.acquisition import highest_landscape_selection
 from activereg.experiment import (get_gt_dataframes, 
                                   sampling_block, 
                                   setup_data_pool,
@@ -168,7 +169,7 @@ if __name__ == '__main__':
     # Acquisition protocol
     ACQUI_PROTOCOL = config.get('acquisition_protocol', None)
 
-    print(f"Experiment Name: {EXP_NAME}\n->\t({BENCHMARK_PATH})")
+    print(f"Experiment Name: {EXP_NAME}\n->\t{BENCHMARK_PATH}")
     print(f"Search Variables: {SEARCH_VAR}")
     print(f"Target Variable: {TARGET_VAR}")
     print(f"Initial Sampling: {INIT_SAMPLING} with {INIT_BATCH} points")
@@ -293,9 +294,7 @@ if __name__ == '__main__':
         refine_function = FUNCTIONS_DICT[refine_function_name]
         refine_step = refinement_config.get('refinement_step', 20)
         refine_centroids = refinement_config.get('refinement_centroids', 5)
-        refine_batch_size = refinement_config.get('refinement_batch_size', 100)
-        refine_counter = 0
-        next_refine_target = refine_step
+        refine_batch_size = refinement_config.get('refinement_batch_size', 500)
         centroids_selection_method = refinement_config.get('centroids_selection_method', 'fps')
 
         print(f"Adaptive refinement activated every {refine_step} points acquired, "
@@ -315,13 +314,6 @@ if __name__ == '__main__':
     # Contains data of all the training points acquired during the experiment with additional metadata
     train_points_data = []
 
-    # # Arrays to store the predicted and uncertainty landscapes for all repetitions and cycles
-    # pool_pred_landscape_array = np.full((N_REPS, N_CYCLES+1, X_pool.shape[0]), np.nan)
-    # pool_unc_landscape_array = np.full((N_REPS, N_CYCLES+1, X_pool.shape[0]), np.nan)
-
-    # val_pred_landscape_array = np.full((N_REPS, N_CYCLES+1, X_val.shape[0]), np.nan) if X_val is not None else None
-    # val_unc_landscape_array = np.full((N_REPS, N_CYCLES+1, X_val.shape[0]), np.nan) if X_val is not None else None
-
     # Init the acquisition parameters generator
     acqui_param_gen = AcquisitionParametersGenerator(
         acquisition_params=ACQUI_PARAMS,
@@ -331,6 +323,13 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------
     # EXPERIMENT REPETITIONS
     for rep in range(N_REPS):
+
+        # --------------------------------------------------------------------------------
+        print(f"\n--- Starting repetition {rep+1}/{N_REPS} ---\n")
+        # Refinement step tracking per repetition
+        if refine_generator is not None:
+            refine_counter = 0
+            next_refine_target = refine_step
 
         # --------------------------------------------------------------------------------
         # CYCLE 0 - INITIAL SAMPLING
@@ -392,14 +391,6 @@ if __name__ == '__main__':
                 penalization_params=(pen_radius, pen_strength) if landscape_penalization is not None else None
             )
 
-            # # Store the predicted and uncertainty landscapes for the current cycle
-            # pool_pred_landscape_array[rep, cycle] = y_pred_pool
-            # pool_unc_landscape_array[rep, cycle] = y_unc_pool
-
-            # if X_val is not None:
-            #     val_pred_landscape_array[rep, cycle] = y_pred_val
-            #     val_unc_landscape_array[rep, cycle] = y_unc_val
-
             # Store benchmark data for the current cycle
             cycle_data_dict = {
                 "repetition": rep+1,
@@ -448,9 +439,14 @@ if __name__ == '__main__':
                     nn_ref_distance = compute_reference_distance(X=X_train, method="median_nn")
                     half_side_hyperc_length = nn_ref_distance
 
-                    # Accumulate the seed (size of refine_step) of the refinement points from the train set acquired so far
-                    # TODO: used the highest region in the predicted landscape as seed for the refinement
-                    X_seed_refinement = X_train[-refine_step:]
+                    # Accumulate the seed (size of refine_step) of the refinement points from the top predicted candidates so far
+                    highest_prediction_ndx = highest_landscape_selection(
+                        landscape=y_pred_pool,
+                        percentile=90,
+                        min_points=100,
+                        max_points=1000
+                    )
+                    X_seed_refinement = X_pool[highest_prediction_ndx]  # Based on highest predicted values in the pool
 
                     # Compress the seed points to just the centroids via Farthest Point Sampling (FPS)
                     centroids_ndx = sample_landscape(
@@ -485,11 +481,11 @@ if __name__ == '__main__':
                     y_pool_refined = refined_df[refined_df['set'] == 'train'][TARGET_VAR].to_numpy()
 
                     # Filter out already existing points in the candidates pool
-                    # TODO: make the min distance scaling parameter configurable
+                    # TODO: make the min distance scaling parameter configurable or adaptive
                     X_pool_refined_filtered, filtered_indexes = filter_refined_additions(
                         X_addition=X_refined_scaled,
                         X_existing=X_pool,
-                        min_distance=X_pool_reference_distance * 0.3
+                        min_distance=X_pool_reference_distance * 0.5
                     )
                     y_refined_filtered = y_pool_refined[filtered_indexes]
 
@@ -511,7 +507,7 @@ if __name__ == '__main__':
                         X_val_refined_filtered, val_filtered_indexes = filter_refined_additions(
                             X_addition=X_val_refined_scaled,
                             X_existing=X_val,
-                            min_distance=X_pool_reference_distance
+                            min_distance=X_pool_reference_distance * 0.5
                         )
                         y_val_refined_filtered = y_val_refined[val_filtered_indexes]
 
@@ -536,6 +532,17 @@ if __name__ == '__main__':
 
             # END of Adaptive refinement
             # --------------------------------------------------------------------------------
+        
+        print(f"\n--- End of {rep+1}/{N_REPS} ---\n")
+        # Resetting the pool and candidates sets for the next repetition if the refinement took place
+        if refine_generator is not None:
+            # Reset the pool set; the candidates set is derived from the candidates_df so it is not affected by the refinement
+            X_pool = data_scaler.transform(pool_df[SEARCH_VAR].to_numpy())
+            pool_target_landscape = pool_df[TARGET_VAR].to_numpy().ravel()
+
+            # Reset the validation set
+            X_val = data_scaler.transform(val_df[SEARCH_VAR].to_numpy()) if not val_df.empty else None
+            val_target_landscape = val_df[TARGET_VAR].to_numpy().ravel() if not val_df.empty else None
 
         # END of repetition
         # --------------------------------------------------------------------------------
@@ -547,13 +554,6 @@ if __name__ == '__main__':
 
     train_points_df = pd.DataFrame(train_points_data)
     train_points_df.to_csv(BENCHMARK_PATH / 'train_points_data.csv', index=False)
-
-    # np.save(BENCHMARK_PATH / 'pool_predicted_landscape.npy', pool_pred_landscape_array)
-    # np.save(BENCHMARK_PATH / 'pool_uncertainty_landscape.npy', pool_unc_landscape_array)
-
-    # if X_val is not None:
-    #     np.save(BENCHMARK_PATH / 'val_predicted_landscape.npy', val_pred_landscape_array)
-    #     np.save(BENCHMARK_PATH / 'val_uncertainty_landscape.npy', val_unc_landscape_array)
 
 # END of the experiment
 # --------------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 # ------------------------------------------------------------------------------
 SEED: 13
 
-experiment_name: "6D/ackley_gpr_refinement_test"
+experiment_name: "6D/ackley_gpr_50cy_2pts_ei_refine"
 experiment_notes: "Benchmarking the Ackley 6D function"
 
 # --------------------------------------------------------------
@@ -23,7 +23,6 @@ ground_truth_parameters:
   val_size: 1.0
   method: "lhs"
   negate: true
-  scale_y: false
   noise_std: 0.0
 
 search_space_variables:
@@ -56,12 +55,11 @@ adaptive_refinement:
     - [-32.768, 32.768]
   method: 'lhs'
   negate: true
-  scale_y: false
   refinement_noise_std: 0.0
   refinement_step: 20  # number of points acquired after which to perform refinement
-  refinement_centroids: 10  # number of centroids to use for the refinement (chosen via fps)
-  refinement_batch_size: 100  # number of points to sample around each centroid during refinement
-  centroids_selection_method: "fps"  # "voronoi" or "fps" (farthest point sampling)
+  refinement_centroids: 3  # number of centroids to use for the refinement (chosen via fps)
+  refinement_batch_size: 500  # number of points to sample around each centroid during refinement
+  centroids_selection_method: "voronoi"  # "voronoi" or "fps" (farthest point sampling)
 
 # --------------------------------------------------------------
 # Cycles parameters

@@ -51,11 +51,12 @@ from sklearn.base import BaseEstimator
 # --------------------------------------------------------------------------------
 # FUNCTIONAL FORMS (USED IN THE BENCHMARKS STUDY)
 
-from botorch.test_functions import Hartmann, Ackley
+from botorch.test_functions import Hartmann, Ackley, StyblinskiTang
 
 FUNCTIONS_DICT = {
     "Hartmann": Hartmann,
-    "Ackley": Ackley
+    "Ackley": Ackley,
+    "StyblinskiTang" : StyblinskiTang
 }
 
 # --------------------------------------------------------------------------------
@@ -193,7 +194,6 @@ if __name__ == '__main__':
         function_dim = gt_config.pop('n_dimensions', 3)
         function_bounds = np.array(gt_config.pop('bounds', [[0, 1]] * function_dim))
         function_negate = gt_config.pop('negate', False)
-        function_scale_y = gt_config.pop('scale_y', False)
 
         if function_name not in FUNCTIONS_DICT:
             raise ValueError(f"Function '{function_name}' is not defined. Choose from {list(FUNCTIONS_DICT.keys())}.")
@@ -203,7 +203,6 @@ if __name__ == '__main__':
             n_dimensions=function_dim,
             bounds=function_bounds,
             negate=function_negate,
-            scale_y=function_scale_y,
             seed=seed
         )
         
@@ -244,11 +243,6 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
-    # SET UP THE MODEL
-    ML_MODEL = setup_ml_model(config)
-    # --------------------------------------------------------------------------------
-
-    # --------------------------------------------------------------------------------
     # LANDSCAPE ADDITIONAL PARAMETERS AND SETUP
     # Set up landscape penalization parameters
     landscape_penalization = config.get('landscape_penalization', None)
@@ -268,17 +262,15 @@ if __name__ == '__main__':
         refine_method = refinement_config.get('method', 'lhs')
         refine_noise_std = refinement_config.get('refinement_noise_std', 0.0)
         refine_function_negate = refinement_config.get('negate', False)
-        refine_function_scale_y = refinement_config.get('scale_y', False)
 
         if gt_file is None:
             assert refine_function_name == function_name, "Refinement function must be the same as the defined ground truth function."
             assert refine_function_dim == function_dim, "Refinement function dimension must be the same as the defined ground truth function."
             
             assert refine_function_negate == function_negate, "Refinement function negate parameter must be the same as the defined ground truth function."
-            assert refine_function_scale_y == function_scale_y, "Refinement function scale_y parameter must be the same as the defined ground truth function."
 
         elif gt_file is not None:
-            print(f"Adaptive refinement is set with negate={refine_function_negate} and scale_y={refine_function_scale_y}. "
+            print(f"Adaptive refinement is set with negate={refine_function_negate}. "
                   f"Check that these parameters are consistent with the ground truth function settings.")
             if refine_function_name not in FUNCTIONS_DICT:
                 raise ValueError(f"Refinement function '{refine_function_name}' is not defined. Choose from {list(FUNCTIONS_DICT.keys())}.")
@@ -287,7 +279,6 @@ if __name__ == '__main__':
             n_dimensions=refine_function_dim,
             bounds=refine_function_bounds,
             negate=refine_function_negate,
-            scale_y=refine_function_scale_y,
             seed=seed
         )
 
@@ -323,6 +314,11 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------
     # EXPERIMENT REPETITIONS
     for rep in range(N_REPS):
+
+        # --------------------------------------------------------------------------------
+        # SET UP THE MODEL
+        ML_MODEL = setup_ml_model(config)
+        # --------------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------------
         print(f"\n--- Starting repetition {rep+1}/{N_REPS} ---\n")
@@ -543,6 +539,10 @@ if __name__ == '__main__':
             # Reset the validation set
             X_val = data_scaler.transform(val_df[SEARCH_VAR].to_numpy()) if not val_df.empty else None
             val_target_landscape = val_df[TARGET_VAR].to_numpy().ravel() if not val_df.empty else None
+
+        # Save the model at the end of the repetition
+        model_save_path = BENCHMARK_PATH / f'ml_model_rep{rep+1}.joblib'
+        joblib.dump(ML_MODEL, model_save_path)
 
         # END of repetition
         # --------------------------------------------------------------------------------

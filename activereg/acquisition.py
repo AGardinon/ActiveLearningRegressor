@@ -4,7 +4,11 @@ import numpy as np
 from scipy.stats import norm
 from scipy.spatial import cKDTree
 from activereg.mlmodel import MLModel
+from activereg.sampling import sample_landscape
 
+# --------------------------------------------------------------
+# Generic landscape sampling and penalization functions
+# --------------------------------------------------------------
 
 def highest_landscape_selection(
     landscape: np.ndarray, 
@@ -72,6 +76,9 @@ def penalize_landscape_fast(
     
     return corrected
 
+# --------------------------------------------------------------
+# Acquisition function implementations
+# --------------------------------------------------------------
 
 class AcquisitionFunction:
     """
@@ -306,3 +313,93 @@ def maximum_predicted_value(mu: np.ndarray) -> np.ndarray:
     mpv = np.zeros_like(mu)
     mpv[mu.argmax()] = 1.0
     return mpv
+
+# --------------------------------------------------------------
+# Batch acquisition strategies
+# --------------------------------------------------------------
+
+# Highest landscape hypersurface sampling
+def batch_highest_landscape(
+    X_candidates: np.ndarray,
+    landscape: np.ndarray,
+    percentile: int,
+    batch_size: int,
+    sampling_method: str = 'voronoi',
+) -> np.ndarray:
+    
+    # Make a copy to avoid modifying original data
+    X_candidates_tmp = X_candidates.copy()
+
+    # Define candidate indexes
+    X_candidates_indexes = np.arange(X_candidates.shape[0])
+
+    # Select top percentile points
+    candidate_indices = highest_landscape_selection(landscape=landscape, percentile=percentile)
+    X_candidates_selected = X_candidates_tmp[candidate_indices]
+    X_candidates_selected_indices = X_candidates_indexes[candidate_indices]
+
+    # Select points from the selected candidates
+    sampled_indices = sample_landscape(
+        X_landscape=X_candidates_selected,
+        n_points=batch_size,
+        method=sampling_method
+    )
+    sampled_new_indices = X_candidates_selected_indices[sampled_indices]
+
+    return sampled_new_indices
+
+
+# Batch acquisition using Constant Liar strategy
+# faithful to the CL literature (Ginsbourger et al.)
+def batch_constant_liar(
+    model: MLModel,
+    X_candidates: np.ndarray,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    batch_size: int,
+    acquisition_function: AcquisitionFunction,
+    lie_value: float = None
+) -> np.ndarray:
+    
+    selected_indices = []
+    
+    # Make local copies to avoid modifying original data
+    X_train_tmp = X_train.copy()
+    y_train_tmp = y_train.copy()
+    X_candidates_tmp = X_candidates.copy()
+    model_tmp = model
+
+    # Track original candidate indexes
+    X_candidates_indexes = np.arange(X_candidates.shape[0])
+
+    for _ in range(batch_size):
+        # Compute landscape (the methods uses MLModel.predict that returns mu,sigma internally)
+        landscape_tmp = acquisition_function.landscape_acquisition(X_candidates_tmp, model_tmp)
+
+        # Select the best candidate
+        best_idx = np.argmax(landscape_tmp)
+
+        # Map back to original candidate index
+        original_idx = X_candidates_indexes[best_idx]
+        selected_indices.append(original_idx)
+
+        # Determine the lie value
+        if lie_value is None:
+            # Use the predicted mean at the selected point as the lie value
+            _, mu_best, _ = model.predict(X_candidates_tmp[best_idx].reshape(1, -1))
+            y_lie = mu_best[0]
+        else:
+            y_lie = np.array([lie_value], dtype=float)
+
+        # Update the temporary training set with the selected point and lie value
+        X_train_tmp = np.vstack([X_train_tmp, X_candidates_tmp[best_idx]])
+        y_train_tmp = np.hstack([y_train_tmp, y_lie])
+
+        # Retrain the model with the updated training set
+        model_tmp.train(X_train_tmp, y_train_tmp)
+
+        # Remove the selected point from the candidate set
+        X_candidates_tmp = np.delete(X_candidates_tmp, best_idx, axis=0)
+        X_candidates_indexes = np.delete(X_candidates_indexes, best_idx, axis=0)
+
+    return np.array(selected_indices)

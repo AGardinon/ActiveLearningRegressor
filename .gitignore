@@ -178,4 +178,5 @@ lab_experiments/
 insilico_al/
 benchmarks/
 datasets/
+script/*.out
 

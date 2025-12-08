@@ -360,7 +360,19 @@ def batch_constant_liar(
     acquisition_function: AcquisitionFunction,
     lie_value: float = None
 ) -> np.ndarray:
-    
+    """Batch acquisition using Constant Liar strategy.
+
+    Args:
+        model (MLModel): Machine learning model.
+        X_candidates (np.ndarray): Candidate points.
+        X_train (np.ndarray): Training input points.
+        y_train (np.ndarray): Training target values.
+        batch_size (int): Number of points to acquire.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        lie_value (float, optional): Lie value to use. Defaults to None.
+    Returns:
+        np.ndarray: Indices of selected points.
+    """
     selected_indices = []
     
     # Make local copies to avoid modifying original data
@@ -414,7 +426,19 @@ def batch_kriging_believer(
     batch_size: int,
     acquisition_function: AcquisitionFunction
 ) -> np.ndarray:
-    
+    """Batch acquisition using Kriging Believer strategy.
+
+    Args:
+        model (MLModel): Machine learning model.
+        X_candidates (np.ndarray): Candidate points.
+        X_train (np.ndarray): Training input points.
+        y_train (np.ndarray): Training target values.
+        batch_size (int): Number of points to acquire.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+
+    Returns:
+        np.ndarray: Indices of selected points.
+    """
     sampled_new_idx = []
     
     # Make local copies to avoid modifying original data
@@ -448,5 +472,65 @@ def batch_kriging_believer(
         # Remove the selected point from the candidate set
         X_candidates_copy = np.delete(X_candidates_copy, sampled_hls_idx, axis=0)
         X_candidates_indexes = np.delete(X_candidates_indexes, sampled_hls_idx, axis=0)
+
+    return np.array(sampled_new_idx)
+
+
+# Batch acquisition using Local Penalization strategy
+def batch_local_penalization(
+    model: MLModel,
+    X_candidates: np.ndarray,
+    X_train: np.ndarray,
+    batch_size: int,
+    acquisition_function: AcquisitionFunction,
+    penalty_radius: float = 0.1,
+    penalty_strength: float = 1.0
+) -> np.ndarray:
+    """Batch acquisition using Local Penalization strategy.
+
+    Args:
+        model (MLModel): Machine learning model.
+        X_candidates (np.ndarray): Candidate points.
+        X_train (np.ndarray): Training input points.
+        batch_size (int): Number of points to acquire.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        penalty_radius (float, optional): Radius for penalization. Defaults to 0.1.
+        penalty_strength (float, optional): Strength of penalization. Defaults to 1.0.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Indices of selected points.
+    """
+    sampled_new_idx = []
+
+    # Make local copies to avoid modifying original data
+    X_train_copy = X_train.copy()
+    X_candidates_copy = X_candidates.copy()
+
+    # Track original candidate indexes
+    X_candidates_indexes = np.arange(X_candidates.shape[0])
+
+    for _ in range(batch_size):
+        # Compute acquisition landscape
+        landscape = acquisition_function.landscape_acquisition(X_candidates_copy, model)
+
+        # Penalize the landscape based on current training points
+        corrected_landscape = penalize_landscape_fast(
+            landscape=landscape,
+            X_candidates=X_candidates_copy,
+            X_train=X_train_copy,
+            radius=penalty_radius,
+            strength=penalty_strength
+        )
+
+        # Select the best candidate from the penalized landscape
+        best_idx = np.argmax(corrected_landscape)
+        sampled_new_idx.append(X_candidates_indexes[best_idx])
+
+        # Update training set with the selected point
+        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[best_idx]])
+
+        # Remove the selected point from candidates
+        X_candidates_copy = np.delete(X_candidates_copy, best_idx, axis=0)
+        X_candidates_indexes = np.delete(X_candidates_indexes, best_idx, axis=0)
 
     return np.array(sampled_new_idx)

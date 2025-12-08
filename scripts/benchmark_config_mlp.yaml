@@ -3,7 +3,7 @@
 # ------------------------------------------------------------------------------
 SEED: 13
 
-experiment_name: "6D/hartmann_gpr_20cy_5pts_1stage_2_3_5kstart_norefine"
+experiment_name: "6D/hartmann_mlp_20cy_5pts_1stage_2_3_norefine"
 experiment_notes: "Benchmarking the Hartmann 6D function"
 
 # --------------------------------------------------------------
@@ -25,7 +25,7 @@ ground_truth_parameters:
     # - [-32.768, 32.768]
     # - [-32.768, 32.768]
     # - [-32.768, 32.768]
-  n_samples: 5000
+  n_samples: 50000
   val_size: 1.0
   method: "lhs"
   negate: true
@@ -82,16 +82,19 @@ cycle_sampling: "voronoi"
 
 # --------------------------------------------------------------
 # ML model configuration
-ml_model: "GPR"
+ml_model: "AnchoredEnsembleMLP"
 
+# Additional paramters
 model_parameters:
-  kernel_recipe: "MATERN_W"  # for GPR either "RBF_W" or "MATERN_W" or custom recipe
-  n_restarts_optimizer: 300
-  alpha: 1e-10
-  normalize_y: true
-  optimizer: 'fmin_l_bfgs_b'
-  use_gridsearch: false
-  log_transform: false
+  n_models: 5
+  in_feats: 6
+  out_feats: 1
+  hidden_layers: [16, 16]
+  activation: "relu"
+  lambda_anchor: 0.0001
+  lr: 0.001
+  n_epochs: 250
+  device: "cpu"  # Use "cpu" or "cuda" to force device, or null to auto-select
 
 # --------------------------------------------------------------
 # Acquisition functions configuration
@@ -99,7 +102,7 @@ acquisition_parameters:
   - acquisition_mode: "expected_improvement"
     percentile: 95
 
-  - acquisition_mode: "target_expected_improvement_800"
+  - acquisition_mode: "target_expected_improvement"
     percentile: 95
     y_target: 
     epsilon: 150
@@ -108,6 +111,9 @@ acquisition_parameters:
     percentile: 'Max'
 
   - acquisition_mode: "exploration_mutual_info"
+    percentile: 95
+
+  - acquisition_mode: "uncertainty_landscape"
     percentile: 95
 
   - acquisition_mode: "percentage_target_expected_improvement"
@@ -124,7 +130,7 @@ landscape_penalization: null  # radius: 0.25, strength: 1.0
 acquisition_protocol:
   stage_1:
     cycles: 20
-    acquisition_modes: ['exploration_mutual_info', 'expected_improvement']
+    acquisition_modes: ['uncertainty_landscape', 'expected_improvement']
     n_points: [2, 3]  # Number of points to acquire for each mode in stage 1
   # stage_2:
   #   cycles: 40
@@ -138,4 +144,3 @@ acquisition_protocol:
   #   cycles: 20
   #   acquisition_modes: ['expected_improvement']
   #   n_points: [2]  # Number of points to acquire for each mode in stage 4
-

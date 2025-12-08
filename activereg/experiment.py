@@ -164,16 +164,16 @@ def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:
     Returns:
         regmodels.MLModel: The created Gaussian Process Regressor instance.
     """
-    kernel_recipe = model_parameters.pop('kernel_recipe', None)
+    model_parameters_copy = model_parameters.copy()
+    kernel_recipe = model_parameters_copy.pop('kernel_recipe', None)
     assert kernel_recipe is not None, "Kernel recipe must be specified for GPR in the config file."
 
     kernel_recipe = get_gp_kernel(kernel_recipe)
 
-    if 'alpha' in model_parameters:
-        model_parameters['alpha'] = float(model_parameters['alpha'])
+    if 'alpha' in model_parameters_copy:
+        model_parameters_copy['alpha'] = float(model_parameters_copy['alpha'])
     # else use the default value from the regmodels.GPR class
-
-    return regmodels.GPR(kernel=kernel_recipe, **model_parameters)
+    return regmodels.GPR(kernel=kernel_recipe, **model_parameters_copy)
 
 
 def create_anchored_ensemble_mlp(model_parameters: dict) -> regmodels.MLModel:
@@ -303,6 +303,8 @@ def sampling_block(
         else:
             penalized_landscape = landscape
 
+        # TODO: add here option for batch selection methods (e.g., CL, etc.)
+        # TODO: write functional form for batch selection methods to clean up the code
         acq_landscape_ndx = highest_landscape_selection(landscape=penalized_landscape, percentile=percentile)
         X_acq_landscape = X_candidates[acq_landscape_ndx]
         X_acq_landscape_indexes = X_candidates_indexes[acq_landscape_ndx]
@@ -314,7 +316,10 @@ def sampling_block(
         )
 
         sampled_new_idx += list(X_acq_landscape_indexes[sampled_hls_idx])
+        
+        # Append the unpenalized landscape for analysis and possible plotting/output
         landscape_list.append(landscape)
+
         X_train_copy = np.concatenate([X_train_copy, X_candidates[sampled_new_idx]])
 
     return sampled_new_idx, np.vstack(landscape_list)

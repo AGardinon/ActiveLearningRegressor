@@ -403,3 +403,50 @@ def batch_constant_liar(
         X_candidates_indexes = np.delete(X_candidates_indexes, best_idx, axis=0)
 
     return np.array(selected_indices)
+
+
+# Batch acquisition using Kriging Believer strategy
+def batch_kriging_believer(
+    model: MLModel,
+    X_candidates: np.ndarray,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    batch_size: int,
+    acquisition_function: AcquisitionFunction
+) -> np.ndarray:
+    
+    sampled_new_idx = []
+    
+    # Make local copies to avoid modifying original data
+    X_train_copy = X_train.copy()
+    y_train_copy = y_train.copy()
+    X_candidates_copy = X_candidates.copy()
+    model_copy = model
+
+    # Track original candidate indexes
+    X_candidates_indexes = np.arange(X_candidates.shape[0])
+
+    for _ in range(batch_size):
+        # Compute landscape (the methods uses MLModel.predict that returns mu,sigma internally)
+        landscape = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
+
+        # Select the best candidate
+        sampled_hls_idx = np.argmax(landscape)
+        sampled_new_idx.append(X_candidates_indexes[sampled_hls_idx])
+
+        # Predict the value at the selected point
+        _, mu_best, _ = model_copy.predict(X_candidates_copy[sampled_hls_idx].reshape(1, -1))
+        y_believe = mu_best[0]
+
+        # Update the temporary training set with the selected point and believed value
+        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[sampled_hls_idx]])
+        y_train_copy = np.hstack([y_train_copy, y_believe])
+
+        # Retrain the model with the updated training set
+        model_copy.train(X_train_copy, y_train_copy)
+
+        # Remove the selected point from the candidate set
+        X_candidates_copy = np.delete(X_candidates_copy, sampled_hls_idx, axis=0)
+        X_candidates_indexes = np.delete(X_candidates_indexes, sampled_hls_idx, axis=0)
+
+    return np.array(sampled_new_idx)

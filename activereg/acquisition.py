@@ -321,17 +321,34 @@ def maximum_predicted_value(mu: np.ndarray) -> np.ndarray:
 # Highest landscape hypersurface sampling
 def batch_highest_landscape(
     X_candidates: np.ndarray,
-    landscape: np.ndarray,
-    percentile: int,
+    model: MLModel,
+    acquisition_function: AcquisitionFunction,
     batch_size: int,
+    #
+    percentile: int,
     sampling_method: str = 'voronoi',
 ) -> np.ndarray:
+    """Batch acquisition using Highest Landscape Sampling strategy.
+    
+    Args:
+        X_candidates (np.ndarray): Candidate points.
+        model (MLModel): Machine learning model.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        batch_size (int): Number of points to acquire.
+        percentile (int): Percentile for highest landscape selection.
+        sampling_method (str, optional): Sampling method. Defaults to 'voronoi'.
+    Returns:
+        np.ndarray: Indices of selected points.
+    """
     
     # Make a copy to avoid modifying original data
     X_candidates_tmp = X_candidates.copy()
 
-    # Define candidate indexes
+    # Track original candidate indexes
     X_candidates_indexes = np.arange(X_candidates.shape[0])
+
+    # Compute landscape
+    landscape = acquisition_function.landscape_acquisition(X_candidates_tmp, model)
 
     # Select top percentile points
     candidate_indices = highest_landscape_selection(landscape=landscape, percentile=percentile)
@@ -352,23 +369,24 @@ def batch_highest_landscape(
 # Batch acquisition using Constant Liar strategy
 # faithful to the CL literature (Ginsbourger et al.)
 def batch_constant_liar(
-    model: MLModel,
     X_candidates: np.ndarray,
+    model: MLModel,
+    acquisition_function: AcquisitionFunction,
+    batch_size: int,
+    #
     X_train: np.ndarray,
     y_train: np.ndarray,
-    batch_size: int,
-    acquisition_function: AcquisitionFunction,
     lie_value: float = None
 ) -> np.ndarray:
     """Batch acquisition using Constant Liar strategy.
 
     Args:
-        model (MLModel): Machine learning model.
         X_candidates (np.ndarray): Candidate points.
+        model (MLModel): Machine learning model.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        batch_size (int): Number of points to acquire.
         X_train (np.ndarray): Training input points.
         y_train (np.ndarray): Training target values.
-        batch_size (int): Number of points to acquire.
-        acquisition_function (AcquisitionFunction): Acquisition function instance.
         lie_value (float, optional): Lie value to use. Defaults to None.
     Returns:
         np.ndarray: Indices of selected points.
@@ -419,22 +437,23 @@ def batch_constant_liar(
 
 # Batch acquisition using Kriging Believer strategy
 def batch_kriging_believer(
-    model: MLModel,
     X_candidates: np.ndarray,
-    X_train: np.ndarray,
-    y_train: np.ndarray,
+    model: MLModel,
+    acquisition_function: AcquisitionFunction,
     batch_size: int,
-    acquisition_function: AcquisitionFunction
+    #
+    X_train: np.ndarray,
+    y_train: np.ndarray
 ) -> np.ndarray:
     """Batch acquisition using Kriging Believer strategy.
 
     Args:
-        model (MLModel): Machine learning model.
         X_candidates (np.ndarray): Candidate points.
+        model (MLModel): Machine learning model.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        batch_size (int): Number of points to acquire.
         X_train (np.ndarray): Training input points.
         y_train (np.ndarray): Training target values.
-        batch_size (int): Number of points to acquire.
-        acquisition_function (AcquisitionFunction): Acquisition function instance.
 
     Returns:
         np.ndarray: Indices of selected points.
@@ -478,20 +497,21 @@ def batch_kriging_believer(
 
 # Batch acquisition using Local Penalization strategy
 def batch_local_penalization(
-    model: MLModel,
     X_candidates: np.ndarray,
-    batch_size: int,
+    model: MLModel,
     acquisition_function: AcquisitionFunction,
+    batch_size: int,
+    #
     L: float = 1.0,
     alpha: float = 1.0
 ) -> np.ndarray:
     """Batch acquisition using Local Penalization strategy.
 
     Args:
-        model (MLModel): Machine learning model.
         X_candidates (np.ndarray): Candidate points.
-        batch_size (int): Number of points to acquire.
+        model (MLModel): Machine learning model.
         acquisition_function (AcquisitionFunction): Acquisition function instance.
+        batch_size (int): Number of points to acquire.
         L (float, optional): Lipschitz constant. Defaults to 1.0.
         alpha (float, optional): Penalization strength. Defaults to 1.0.
 

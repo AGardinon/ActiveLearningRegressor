@@ -480,57 +480,58 @@ def batch_kriging_believer(
 def batch_local_penalization(
     model: MLModel,
     X_candidates: np.ndarray,
-    X_train: np.ndarray,
     batch_size: int,
     acquisition_function: AcquisitionFunction,
-    penalty_radius: float = 0.1,
-    penalty_strength: float = 1.0
+    L: float = 1.0,
+    alpha: float = 1.0
 ) -> np.ndarray:
     """Batch acquisition using Local Penalization strategy.
 
     Args:
         model (MLModel): Machine learning model.
         X_candidates (np.ndarray): Candidate points.
-        X_train (np.ndarray): Training input points.
         batch_size (int): Number of points to acquire.
         acquisition_function (AcquisitionFunction): Acquisition function instance.
-        penalty_radius (float, optional): Radius for penalization. Defaults to 0.1.
-        penalty_strength (float, optional): Strength of penalization. Defaults to 1.0.
+        L (float, optional): Lipschitz constant. Defaults to 1.0.
+        alpha (float, optional): Penalization strength. Defaults to 1.0.
 
     Returns:
-        tuple[np.ndarray, np.ndarray]: Indices of selected points.
+        np.ndarray: Indices of selected points.
     """
-    sampled_new_idx = []
+    selected_indices = []
+    selected_points = []
 
-    # Make local copies to avoid modifying original data
-    X_train_copy = X_train.copy()
     X_candidates_copy = X_candidates.copy()
+    candidate_indices = np.arange(len(X_candidates))
+    model_copy = model
 
-    # Track original candidate indexes
-    X_candidates_indexes = np.arange(X_candidates.shape[0])
+    # Compute initial acquisition landscape
+    landscape = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
 
     for _ in range(batch_size):
-        # Compute acquisition landscape
-        landscape = acquisition_function.landscape_acquisition(X_candidates_copy, model)
+        # Start from baseline landscape
+        landscape_tmp = landscape.copy()
 
-        # Penalize the landscape based on current training points
-        corrected_landscape = penalize_landscape_fast(
-            landscape=landscape,
-            X_candidates=X_candidates_copy,
-            X_train=X_train_copy,
-            radius=penalty_radius,
-            strength=penalty_strength
-        )
+        # Apply penalization for each already selected point
+        # Simple linear penalization based on distance and Lipschitz constant
+        for xp in selected_points:
+            d = np.linalg.norm(X_candidates_copy - xp, axis=1)
+            R = alpha / L  # radius based on Lipschitz constant
+            phi = np.minimum(1.0, d / R)  # linear decay
+            landscape_tmp *= phi  # apply penalization
 
         # Select the best candidate from the penalized landscape
-        best_idx = np.argmax(corrected_landscape)
-        sampled_new_idx.append(X_candidates_indexes[best_idx])
+        best_idx = np.argmax(landscape_tmp)
+        xp_best = X_candidates_copy[best_idx]
 
-        # Update training set with the selected point
-        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[best_idx]])
+        original_idx = candidate_indices[best_idx]
+        selected_indices.append(original_idx)
 
-        # Remove the selected point from candidates
+        selected_points.append(xp_best)
+
+        # Remove the selected point from the candidate set and landscape for next iteration
         X_candidates_copy = np.delete(X_candidates_copy, best_idx, axis=0)
-        X_candidates_indexes = np.delete(X_candidates_indexes, best_idx, axis=0)
+        candidate_indices = np.delete(candidate_indices, best_idx, axis=0)
+        landscape = np.delete(landscape, best_idx, axis=0)
 
-    return np.array(sampled_new_idx)
+    return np.array(selected_indices)

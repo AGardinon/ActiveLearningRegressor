@@ -289,20 +289,20 @@ def sampling_block(
             X_train_copy = np.concatenate([X_train_copy, X_candidates[[acq_mpv_ndx]]])
             continue
 
+        # Generic penalization of the landscape to add soft avoidance of sampled points
+        # Generally can be skipped for batch methods that have their own penalization
         if penalization_params:
             radius, strength = penalization_params
-            penalized_landscape = penalize_landscape_fast(
+            landscape = penalize_landscape_fast(
                 landscape=landscape,
                 X_candidates=X_candidates,
                 X_train=X_train_copy,
                 radius=radius, strength=strength,
             )
-        else:
-            penalized_landscape = landscape
 
         # TODO: add here option for batch selection methods (e.g., CL, etc.)
         # TODO: write functional form for batch selection methods to clean up the code
-        acq_landscape_ndx = highest_landscape_selection(landscape=penalized_landscape, percentile=percentile)
+        acq_landscape_ndx = highest_landscape_selection(landscape=landscape, percentile=percentile)
         X_acq_landscape = X_candidates[acq_landscape_ndx]
         X_acq_landscape_indexes = X_candidates_indexes[acq_landscape_ndx]
 

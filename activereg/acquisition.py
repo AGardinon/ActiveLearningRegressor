@@ -318,6 +318,26 @@ def maximum_predicted_value(mu: np.ndarray) -> np.ndarray:
 # Batch acquisition strategies
 # --------------------------------------------------------------
 
+def landscape_sanity_check(landscape: np.ndarray) -> np.ndarray:
+    """Check and adjust the shape of the acquisition landscape.
+
+    Args:
+        landscape (np.ndarray): Input landscape array.
+    Returns:
+        np.ndarray: Adjusted landscape array.
+    """
+    if len(landscape.shape) > 1 and landscape.shape[1] == 1:
+        landscape = landscape.ravel()
+        return landscape
+    
+    elif len(landscape.shape) > 1 and landscape.shape[1] > 1:
+        raise ValueError("Landscape shape is multi dimensional. "
+        "Expected 1D array or 2D array with single column. "
+        "Multi output acquisition functions are not supported.")
+    
+    return landscape
+    
+
 # Highest landscape hypersurface sampling
 def batch_highest_landscape(
     X_candidates: np.ndarray,
@@ -329,7 +349,7 @@ def batch_highest_landscape(
     sampling_method: str = 'voronoi',
 ) -> np.ndarray:
     """Batch acquisition using Highest Landscape Sampling strategy.
-    
+
     Args:
         X_candidates (np.ndarray): Candidate points.
         model (MLModel): Machine learning model.
@@ -349,6 +369,7 @@ def batch_highest_landscape(
 
     # Compute landscape
     landscape = acquisition_function.landscape_acquisition(X_candidates_tmp, model)
+    landscape = landscape_sanity_check(landscape)
 
     # Select top percentile points
     candidate_indices = highest_landscape_selection(landscape=landscape, percentile=percentile)
@@ -394,17 +415,18 @@ def batch_constant_liar(
     selected_indices = []
     
     # Make local copies to avoid modifying original data
-    X_train_tmp = X_train.copy()
-    y_train_tmp = y_train.copy()
-    X_candidates_tmp = X_candidates.copy()
-    model_tmp = model
+    X_train_copy = X_train.copy()
+    y_train_copy = y_train.copy()
+    X_candidates_copy = X_candidates.copy()
+    model_copy = model
 
     # Track original candidate indexes
     X_candidates_indexes = np.arange(X_candidates.shape[0])
 
     for _ in range(batch_size):
         # Compute landscape (the methods uses MLModel.predict that returns mu,sigma internally)
-        landscape_tmp = acquisition_function.landscape_acquisition(X_candidates_tmp, model_tmp)
+        landscape_tmp = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
+        landscape_tmp = landscape_sanity_check(landscape_tmp)
 
         # Select the best candidate
         best_idx = np.argmax(landscape_tmp)
@@ -416,20 +438,19 @@ def batch_constant_liar(
         # Determine the lie value
         if lie_value is None:
             # Use the predicted mean at the selected point as the lie value
-            _, mu_best, _ = model.predict(X_candidates_tmp[best_idx].reshape(1, -1))
+            _, mu_best, _ = model_copy.predict(X_candidates_copy[best_idx].reshape(1, -1))
             y_lie = mu_best[0]
         else:
             y_lie = np.array([lie_value], dtype=float)
 
         # Update the temporary training set with the selected point and lie value
-        X_train_tmp = np.vstack([X_train_tmp, X_candidates_tmp[best_idx]])
-        y_train_tmp = np.hstack([y_train_tmp, y_lie])
+        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[best_idx]])
+        y_train_copy = np.hstack([y_train_copy, y_lie])
 
         # Retrain the model with the updated training set
-        model_tmp.train(X_train_tmp, y_train_tmp)
-
+        model_copy.train(X_train_copy, y_train_copy)
         # Remove the selected point from the candidate set
-        X_candidates_tmp = np.delete(X_candidates_tmp, best_idx, axis=0)
+        X_candidates_copy = np.delete(X_candidates_copy, best_idx, axis=0)
         X_candidates_indexes = np.delete(X_candidates_indexes, best_idx, axis=0)
 
     return np.array(selected_indices)
@@ -471,10 +492,11 @@ def batch_kriging_believer(
 
     for _ in range(batch_size):
         # Compute landscape (the methods uses MLModel.predict that returns mu,sigma internally)
-        landscape = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
+        landscape_tmp = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
+        landscape_tmp = landscape_sanity_check(landscape_tmp)
 
         # Select the best candidate
-        sampled_hls_idx = np.argmax(landscape)
+        sampled_hls_idx = np.argmax(landscape_tmp)
         sampled_new_idx.append(X_candidates_indexes[sampled_hls_idx])
 
         # Predict the value at the selected point
@@ -522,11 +544,12 @@ def batch_local_penalization(
     selected_points = []
 
     X_candidates_copy = X_candidates.copy()
-    candidate_indices = np.arange(len(X_candidates))
+    X_candidates_indexes = np.arange(len(X_candidates))
     model_copy = model
 
     # Compute initial acquisition landscape
     landscape = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
+    landscape = landscape_sanity_check(landscape)
 
     for _ in range(batch_size):
         # Start from baseline landscape
@@ -544,14 +567,14 @@ def batch_local_penalization(
         best_idx = np.argmax(landscape_tmp)
         xp_best = X_candidates_copy[best_idx]
 
-        original_idx = candidate_indices[best_idx]
+        original_idx = X_candidates_indexes[best_idx]
         selected_indices.append(original_idx)
 
         selected_points.append(xp_best)
 
         # Remove the selected point from the candidate set and landscape for next iteration
         X_candidates_copy = np.delete(X_candidates_copy, best_idx, axis=0)
-        candidate_indices = np.delete(candidate_indices, best_idx, axis=0)
+        X_candidates_indexes = np.delete(X_candidates_indexes, best_idx, axis=0)
         landscape = np.delete(landscape, best_idx, axis=0)
 
     return np.array(selected_indices)

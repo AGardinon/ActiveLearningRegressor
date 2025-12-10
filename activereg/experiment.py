@@ -12,6 +12,7 @@ from activereg.acquisition import (
     penalize_landscape_fast,
     highest_landscape_selection,
     AcquisitionFunction,
+    landscape_sanity_check,
 )
 
 
@@ -275,14 +276,10 @@ def sampling_block(
             assert n_points_per_style == 1, "Number of points must be 1 when using maximum_predicted_value acquisition mode."
 
         acqui_func = AcquisitionFunction(y_best=y_best, **acqui_param)
+        # Compute pure landscape for possible output/analysis (batch methods can modify it)
         landscape = acqui_func.landscape_acquisition(X_candidates=X_candidates, ml_model=ml_model)
-        # check the shape of the landscape and ravel if necessary
-        if len(landscape.shape) > 1 and landscape.shape[1] == 1:
-            landscape = landscape.ravel()
-        elif len(landscape.shape) > 1 and landscape.shape[1] > 1:
-            raise ValueError("Landscape shape is multi dimensional. "
-            "Expected 1D array or 2D array with single column. "
-            "Multi output acquisition functions are not supported.")
+        landscape = landscape_sanity_check(landscape)
+        landscape_list.append(landscape)
 
         # skip if acquisition mode is maximum_predicted_value
         if acqui_func.acquisition_mode == 'maximum_predicted_value':
@@ -316,9 +313,6 @@ def sampling_block(
         )
 
         sampled_new_idx += list(X_acq_landscape_indexes[sampled_hls_idx])
-        
-        # Append the unpenalized landscape for analysis and possible plotting/output
-        landscape_list.append(landscape)
 
         X_train_copy = np.concatenate([X_train_copy, X_candidates[sampled_new_idx]])
 

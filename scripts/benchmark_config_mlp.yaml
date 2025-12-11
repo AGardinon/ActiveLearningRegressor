@@ -78,7 +78,6 @@ adaptive_refinement: null # refinement parameters disabled if null
 n_cycles: 20
 init_batch_size: 5
 init_sampling: "random"
-cycle_sampling: "voronoi"
 
 # --------------------------------------------------------------
 # ML model configuration
@@ -100,30 +99,31 @@ model_parameters:
 # Acquisition functions configuration
 acquisition_parameters:
   - acquisition_mode: "expected_improvement"
-    percentile: 95
 
   - acquisition_mode: "target_expected_improvement"
-    percentile: 95
     y_target: 
     epsilon: 150
 
   - acquisition_mode: "maximum_predicted_value"
-    percentile: 'Max'
 
   - acquisition_mode: "exploration_mutual_info"
-    percentile: 95
 
   - acquisition_mode: "uncertainty_landscape"
-    percentile: 95
 
   - acquisition_mode: "percentage_target_expected_improvement"
-    percentile: 95
     percentage: 80
 
   - acquisition_mode: "random"
-    percentile: 0
 
 landscape_penalization: null  # radius: 0.25, strength: 1.0
+
+batch_selection:
+  # highest_landscape | constant_liar | kriging_believer | local_penalization
+  method: "highest_landscape"
+  method_params: # if `null` uses default params for the selected mode (see documentation for details)
+    # eg. for highest_landscape:
+    percentile: 95
+    sampling_method: "voronoi"
 
 # --------------------------------------------------------------
 # Multi-stage acquisition protocol configuration

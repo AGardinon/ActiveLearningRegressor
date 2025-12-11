@@ -151,7 +151,6 @@ if __name__ == '__main__':
      N_CYCLES,           # Number of active learning cycles
      INIT_BATCH,         # Initial batch size
      INIT_SAMPLING,      # Initial sampling method
-     CYCLE_SAMPLING,     # Cycle sampling method
      ACQUI_PARAMS,       # Acquisition function parameters
      SEARCH_VAR,         # Search space variables
      TARGET_VAR) = setup_experiment_variables(config)
@@ -174,7 +173,6 @@ if __name__ == '__main__':
     print(f"Search Variables: {SEARCH_VAR}")
     print(f"Target Variable: {TARGET_VAR}")
     print(f"Initial Sampling: {INIT_SAMPLING} with {INIT_BATCH} points")
-    print(f"Cycle Sampling: {CYCLE_SAMPLING} for {N_CYCLES} cycles")
 
     # --------------------------------------------------------------------------------
     # GET/CREATE GT DATAFRAMES
@@ -250,6 +248,16 @@ if __name__ == '__main__':
         pen_radius = landscape_penalization.get('radius', None)
         pen_strength = landscape_penalization.get('strength', None)
         print(f"Landscape penalization activated with radius {pen_radius} and strength {pen_strength}.")
+
+    # --------------------------------------------------------------------------------
+    # BATCH SELECTION STRATEGY SETUP
+    batch_selection_config = config.get('batch_selection', None)
+    if batch_selection_config is not None:
+        batch_selection_method = batch_selection_config.get('method', 'highest_landscape')
+        batch_selection_params = batch_selection_config.get('method_params') or {}
+        print(f"Batch selection strategy: {batch_selection_method} with params: {batch_selection_params}")
+    else:
+        raise ValueError("Batch selection configuration must be provided in the config file, with at least the method defined.")
 
     # --------------------------------------------------------------------------------
     # ADAPTIVE REFINEMENT SETUP
@@ -380,10 +388,11 @@ if __name__ == '__main__':
             sampled_indexes, landscape = sampling_block(
                 X_candidates=X_candidates,
                 X_train=X_train,
-                y_best=y_best,
+                y_train=y_train,
                 ml_model=ML_MODEL,
                 acquisition_params=cycle_acqui_params,
-                sampling_mode=CYCLE_SAMPLING,
+                batch_selection_method=batch_selection_method,
+                batch_selection_params=batch_selection_params,
                 penalization_params=(pen_radius, pen_strength) if landscape_penalization is not None else None
             )
 

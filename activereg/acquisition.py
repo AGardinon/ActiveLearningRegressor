@@ -4,7 +4,11 @@ import numpy as np
 from scipy.stats import norm
 from scipy.spatial import cKDTree
 from activereg.mlmodel import MLModel
+from activereg.sampling import sample_landscape
 
+# --------------------------------------------------------------
+# Generic landscape sampling and penalization functions
+# --------------------------------------------------------------
 
 def highest_landscape_selection(
     landscape: np.ndarray, 
@@ -72,6 +76,9 @@ def penalize_landscape_fast(
     
     return corrected
 
+# --------------------------------------------------------------
+# Acquisition function implementations
+# --------------------------------------------------------------
 
 class AcquisitionFunction:
     """
@@ -306,3 +313,409 @@ def maximum_predicted_value(mu: np.ndarray) -> np.ndarray:
     mpv = np.zeros_like(mu)
     mpv[mu.argmax()] = 1.0
     return mpv
+
+# --------------------------------------------------------------
+# Batch acquisition strategies
+# --------------------------------------------------------------
+
+def landscape_sanity_check(landscape: np.ndarray) -> np.ndarray:
+    """Check and adjust the shape of the acquisition landscape.
+
+    Args:
+        landscape (np.ndarray): Input landscape array.
+    Returns:
+        np.ndarray: Adjusted landscape array.
+    """
+    if len(landscape.shape) > 1 and landscape.shape[1] == 1:
+        landscape = landscape.ravel()
+        return landscape
+    
+    elif len(landscape.shape) > 1 and landscape.shape[1] > 1:
+        raise ValueError("Landscape shape is multi dimensional. "
+        "Expected 1D array or 2D array with single column. "
+        "Multi output acquisition functions are not supported.")
+    
+    return landscape
+
+
+class BatchSelectionStrategy:
+    """
+    Batch selection strategy class.
+    """
+    def __init__(self, strategy_mode: str, strategy_params: dict) -> None:
+        """Initialize the batch selection strategy.
+
+        Args:
+            strategy_mode (str): The mode of the batch selection strategy.
+
+        strategy_params (dict): Additional parameters for specific strategies.
+        Parameters for different strategies:
+            - Highest Landscape Sampling:
+                - percentile (int): Percentile for highest landscape selection.
+                - sampling_method (str): Sampling method ('random', 'kmeans', 'voronoi').
+            - Constant Liar:
+                - lie_type (str): Type of lie value ('max', 'min', 'mean').
+                - lie_value (float): Specific lie value to use.
+            - Local Penalization:
+                - L (float): Lipschitz constant.
+                - alpha (float): Penalization strength.
+        """
+        self.strategy_mode = strategy_mode
+        self.modes = ['highest_landscape', 
+                      'constant_liar', 
+                      'kriging_believer',
+                      'local_penalization']
+        assert strategy_mode in self.modes, f'Function "{strategy_mode}" not implemented, choose from {self.modes}'
+        # additional parameters
+        self.percentile = strategy_params.get('percentile', 95)
+        self.sampling_method = strategy_params.get('sampling_method', 'voronoi')
+        self.lie_type = strategy_params.get('lie_type', 'max')
+        self.lie_value = strategy_params.get('lie_value', None)
+        self.L = strategy_params.get('L', 1.0)
+        self.alpha = strategy_params.get('alpha', 1.0)
+
+    def batch_acquire(
+        self,
+        X_candidates: np.ndarray,
+        model: MLModel,
+        acquisition_function: AcquisitionFunction,
+        batch_size: int,
+        #
+        X_train: np.ndarray = None,
+        y_train: np.ndarray = None
+    ) -> np.ndarray:
+        """Perform batch acquisition based on the selected strategy.
+
+        Args:
+            X_candidates (np.ndarray): Candidate points.
+            model (MLModel): Machine learning model.
+            acquisition_function (AcquisitionFunction): Acquisition function instance.
+            batch_size (int): Number of points to acquire.
+            X_train (np.ndarray, optional): Training input points. Defaults to None.
+            y_train (np.ndarray, optional): Training target values. Defaults to None.
+
+        Returns:
+            np.ndarray: Indices of selected points.
+        """
+        if self.strategy_mode == 'highest_landscape':
+            return batch_highest_landscape(
+                X_candidates=X_candidates,
+                model=model,
+                acquisition_function=acquisition_function,
+                batch_size=batch_size,
+                percentile=self.percentile,
+                sampling_method=self.sampling_method
+            )
+        
+        elif self.strategy_mode == 'constant_liar':
+            if self.lie_value is None:
+                # Determine lie value based on lie type
+                if self.lie_type == 'max':
+                    _, mu, _ = model.predict(X_candidates)
+                    self.lie_value = np.max(mu)
+                elif self.lie_type == 'min':
+                    _, mu, _ = model.predict(X_candidates)
+                    self.lie_value = np.min(mu)
+                elif self.lie_type == 'mean':
+                    _, mu, _ = model.predict(X_candidates)
+                    self.lie_value = np.mean(mu)
+                else:
+                    raise ValueError(f'Lie type "{self.lie_type}" not recognized. Choose from "max", "min", "mean".')
+                
+            return batch_constant_liar(
+                X_candidates=X_candidates,
+                model=model,
+                acquisition_function=acquisition_function,
+                batch_size=batch_size,
+                X_train=X_train,
+                y_train=y_train,
+                lie_value=self.lie_value
+            )
+        
+        elif self.strategy_mode == 'kriging_believer':
+            return batch_kriging_believer(
+                X_candidates=X_candidates,
+                model=model,
+                acquisition_function=acquisition_function,
+                batch_size=batch_size,
+                X_train=X_train,
+                y_train=y_train
+            )
+        
+        elif self.strategy_mode == 'local_penalization':
+            return batch_local_penalization(
+                X_candidates=X_candidates,
+                model=model,
+                acquisition_function=acquisition_function,
+                batch_size=batch_size,
+                L=self.L,
+                alpha=self.alpha
+            )
+        
+    def __str__(self) -> str:
+        return f'BatchSelectionStrategy(strategy_mode={self.strategy_mode})'
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    def get_params(self) -> dict:
+        param_dict = {
+            'strategy_mode': self.strategy_mode,
+            'percentile': self.percentile,
+            'sampling_method': self.sampling_method,
+            'lie_type': self.lie_type,
+            'lie_value': self.lie_value,
+            'L': self.L,
+            'alpha': self.alpha
+        }
+        if self.strategy_mode != 'highest_landscape':
+            param_dict.pop('percentile')
+            param_dict.pop('sampling_method')
+        if self.strategy_mode != 'constant_liar':
+            param_dict.pop('lie_type')
+            param_dict.pop('lie_value')
+        if self.strategy_mode != 'local_penalization':
+            param_dict.pop('L')
+            param_dict.pop('alpha')
+        return param_dict
+    
+
+# Highest landscape hypersurface sampling
+def batch_highest_landscape(
+    X_candidates: np.ndarray,
+    model: MLModel,
+    acquisition_function: AcquisitionFunction,
+    batch_size: int,
+    #
+    percentile: int,
+    sampling_method: str = 'voronoi',
+) -> np.ndarray:
+    """Batch acquisition using Highest Landscape Sampling strategy.
+
+    Args:
+        X_candidates (np.ndarray): Candidate points.
+        model (MLModel): Machine learning model.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        batch_size (int): Number of points to acquire.
+        percentile (int): Percentile for highest landscape selection.
+        sampling_method (str, optional): Sampling method. Defaults to 'voronoi'.
+    Returns:
+        np.ndarray: Indices of selected points, referred to the original candidate set.
+    """
+    # Make a copy to avoid modifying original data
+    X_candidates_tmp = X_candidates.copy()
+
+    # Track original candidate indexes
+    X_candidates_indexes = np.arange(X_candidates.shape[0])
+
+    # Compute landscape
+    landscape = acquisition_function.landscape_acquisition(X_candidates_tmp, model)
+    landscape = landscape_sanity_check(landscape)
+
+    # Select top percentile points
+    candidate_indices = highest_landscape_selection(landscape=landscape, percentile=percentile)
+    X_candidates_selected = X_candidates_tmp[candidate_indices]
+    X_candidates_selected_indices = X_candidates_indexes[candidate_indices]
+
+    # Select points from the selected candidates
+    sampled_indices = sample_landscape(
+        X_landscape=X_candidates_selected,
+        n_points=batch_size,
+        sampling_mode=sampling_method
+    )
+    sampled_new_indices = X_candidates_selected_indices[sampled_indices]
+
+    return sampled_new_indices
+
+
+# Batch acquisition using Constant Liar strategy
+# faithful to the CL literature (Ginsbourger et al.)
+def batch_constant_liar(
+    X_candidates: np.ndarray,
+    model: MLModel,
+    acquisition_function: AcquisitionFunction,
+    batch_size: int,
+    #
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    lie_value: float = None
+) -> np.ndarray:
+    """Batch acquisition using Constant Liar strategy.
+
+    Args:
+        X_candidates (np.ndarray): Candidate points.
+        model (MLModel): Machine learning model.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        batch_size (int): Number of points to acquire.
+        X_train (np.ndarray): Training input points.
+        y_train (np.ndarray): Training target values.
+        lie_value (float, optional): Lie value to use. Defaults to None.
+    Returns:
+        np.ndarray: Indices of selected points, referred to the original candidate set.
+    """
+    selected_indices = []
+    
+    # Make local copies to avoid modifying original data
+    X_train_copy = X_train.copy()
+    y_train_copy = y_train.copy()
+    X_candidates_copy = X_candidates.copy()
+    model_copy = model
+
+    # Track original candidate indexes
+    X_candidates_indexes = np.arange(X_candidates.shape[0])
+
+    for _ in range(batch_size):
+        # Compute landscape (the methods uses MLModel.predict that returns mu,sigma internally)
+        landscape_tmp = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
+        landscape_tmp = landscape_sanity_check(landscape_tmp)
+
+        # Select the best candidate
+        best_idx = np.argmax(landscape_tmp)
+
+        # Map back to original candidate index
+        original_idx = X_candidates_indexes[best_idx]
+        selected_indices.append(original_idx)
+
+        # Determine the lie value
+        if lie_value is None:
+            # Use the predicted mean at the selected point as the lie value
+            _, mu_best, _ = model_copy.predict(X_candidates_copy[best_idx].reshape(1, -1))
+            y_lie = mu_best[0]
+        else:
+            y_lie = np.array([lie_value], dtype=float)
+
+        # Update the temporary training set with the selected point and lie value
+        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[best_idx]])  #! shapes are (N,d) and (d,)
+        y_train_copy = np.vstack([y_train_copy, y_lie])  #! shapes are (N,d) and (d,)
+
+        # Retrain the model with the updated training set
+        model_copy.train(X_train_copy, y_train_copy)
+        # Remove the selected point from the candidate set
+        X_candidates_copy = np.delete(X_candidates_copy, best_idx, axis=0)
+        X_candidates_indexes = np.delete(X_candidates_indexes, best_idx, axis=0)
+
+    return np.array(selected_indices)
+
+
+# Batch acquisition using Kriging Believer strategy
+def batch_kriging_believer(
+    X_candidates: np.ndarray,
+    model: MLModel,
+    acquisition_function: AcquisitionFunction,
+    batch_size: int,
+    #
+    X_train: np.ndarray,
+    y_train: np.ndarray
+) -> np.ndarray:
+    """Batch acquisition using Kriging Believer strategy.
+
+    Args:
+        X_candidates (np.ndarray): Candidate points.
+        model (MLModel): Machine learning model.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        batch_size (int): Number of points to acquire.
+        X_train (np.ndarray): Training input points.
+        y_train (np.ndarray): Training target values.
+
+    Returns:
+        np.ndarray: Indices of selected points, referred to the original candidate set.
+    """
+    sampled_new_idx = []
+    
+    # Make local copies to avoid modifying original data
+    X_train_copy = X_train.copy()
+    y_train_copy = y_train.copy()
+    X_candidates_copy = X_candidates.copy()
+    model_copy = model
+
+    # Track original candidate indexes
+    X_candidates_indexes = np.arange(X_candidates.shape[0])
+
+    for _ in range(batch_size):
+        # Compute landscape (the methods uses MLModel.predict that returns mu,sigma internally)
+        landscape_tmp = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
+        landscape_tmp = landscape_sanity_check(landscape_tmp)
+
+        # Select the best candidate
+        sampled_hls_idx = np.argmax(landscape_tmp)
+        sampled_new_idx.append(X_candidates_indexes[sampled_hls_idx])
+
+        # Predict the value at the selected point
+        _, mu_best, _ = model_copy.predict(X_candidates_copy[sampled_hls_idx].reshape(1, -1))
+        y_believe = mu_best[0]
+
+        # Update the temporary training set with the selected point and believed value
+        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[sampled_hls_idx]])  #! shapes are (N,d) and (d,)
+        y_train_copy = np.vstack([y_train_copy, y_believe])  #! shapes are (N,d) and (d,)
+
+        # Retrain the model with the updated training set
+        model_copy.train(X_train_copy, y_train_copy)
+
+        # Remove the selected point from the candidate set
+        X_candidates_copy = np.delete(X_candidates_copy, sampled_hls_idx, axis=0)
+        X_candidates_indexes = np.delete(X_candidates_indexes, sampled_hls_idx, axis=0)
+
+    return np.array(sampled_new_idx)
+
+
+# Batch acquisition using Local Penalization strategy
+def batch_local_penalization(
+    X_candidates: np.ndarray,
+    model: MLModel,
+    acquisition_function: AcquisitionFunction,
+    batch_size: int,
+    #
+    L: float = 1.0,
+    alpha: float = 1.0
+) -> np.ndarray:
+    """Batch acquisition using Local Penalization strategy.
+
+    Args:
+        X_candidates (np.ndarray): Candidate points.
+        model (MLModel): Machine learning model.
+        acquisition_function (AcquisitionFunction): Acquisition function instance.
+        batch_size (int): Number of points to acquire.
+        L (float, optional): Lipschitz constant. Defaults to 1.0.
+        alpha (float, optional): Penalization strength. Defaults to 1.0.
+
+    Returns:
+        np.ndarray: Indices of selected points, referred to the original candidate set.
+    """
+    selected_indices = []
+    selected_points = []
+
+    X_candidates_copy = X_candidates.copy()
+    X_candidates_indexes = np.arange(len(X_candidates))
+    model_copy = model
+
+    # Compute initial acquisition landscape
+    landscape = acquisition_function.landscape_acquisition(X_candidates_copy, model_copy)
+    landscape = landscape_sanity_check(landscape)
+
+    for _ in range(batch_size):
+        # Start from baseline landscape
+        landscape_tmp = landscape.copy()
+
+        # Apply penalization for each already selected point
+        # Simple linear penalization based on distance and Lipschitz constant
+        for xp in selected_points:
+            d = np.linalg.norm(X_candidates_copy - xp, axis=1)
+            R = alpha / L  # radius based on Lipschitz constant
+            phi = np.minimum(1.0, d / R)  # linear decay
+            landscape_tmp *= phi  # apply penalization
+
+        # Select the best candidate from the penalized landscape
+        best_idx = np.argmax(landscape_tmp)
+        xp_best = X_candidates_copy[best_idx]
+
+        original_idx = X_candidates_indexes[best_idx]
+        selected_indices.append(original_idx)
+
+        selected_points.append(xp_best)
+
+        # Remove the selected point from the candidate set and landscape for next iteration
+        X_candidates_copy = np.delete(X_candidates_copy, best_idx, axis=0)
+        X_candidates_indexes = np.delete(X_candidates_indexes, best_idx, axis=0)
+        landscape = np.delete(landscape, best_idx, axis=0)
+
+    return np.array(selected_indices)

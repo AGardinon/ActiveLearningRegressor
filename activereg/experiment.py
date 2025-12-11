@@ -6,12 +6,12 @@ import activereg.mlmodel as regmodels
 from pathlib import Path
 from sklearn.base import BaseEstimator
 from activereg.format import DATASETS_REPO
-from activereg.sampling import sample_landscape
 from activereg.hyperparams import get_gp_kernel
 from activereg.acquisition import (
     penalize_landscape_fast,
-    highest_landscape_selection,
     AcquisitionFunction,
+    landscape_sanity_check,
+    BatchSelectionStrategy
 )
 
 
@@ -88,7 +88,6 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
     - n_cycles (int): Number of active learning cycles.
     - init_batch_size (int): Initial batch size.
     - init_sampling (str): Initial sampling method.
-    - cycle_sampling (str): Cycle sampling method.
     - acquisition_parameters (list[dict]): Acquisition function parameters.
 
     Args:
@@ -103,7 +102,6 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
     n_cycles = config.get('n_cycles', 3)
     init_batch = config.get('init_batch_size', 8)
     init_sampling = config.get('init_sampling', 'fps')
-    cycle_sampling = config.get('cycle_sampling', 'voronoi')
     acquisition_params = config.get('acquisition_parameters', [])
 
     search_space_vars = config.get('search_space_variables', [])
@@ -116,8 +114,7 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
             additional_notes, 
             n_cycles, 
             init_batch, 
-            init_sampling, 
-            cycle_sampling, 
+            init_sampling,
             acquisition_params,
             search_space_vars,
             target_vars)
@@ -224,30 +221,34 @@ def create_bnn_instance(model_parameters: dict) -> regmodels.MLModel:
 def sampling_block(
         X_candidates: np.ndarray, 
         X_train: np.ndarray,
-        y_best: float, 
+        y_train: np.ndarray,
         ml_model: regmodels.MLModel, 
         acquisition_params: list[dict],
+        batch_selection_method: str,
+        batch_selection_params: dict,
         penalization_params: tuple[float, float] = (0.25, 1.0),
-        sampling_mode: str = 'voronoi'
     ) -> tuple[list[int], np.ndarray]:
     """Samples new points from the landscape of the acquisition function.
 
     Args:
         X_candidates (np.ndarray): candidates points for the cycle.
         X_train (np.ndarray): training points from the cycle.
-        y_best (float): best value of the target variable.
+        y_train (np.ndarray): training target values from the cycle.
         ml_model (regmodels.MLModel): machine learning model used for the experiment.
         acquisition_params (list[dict]): acquisition function parameters for the cycle.
+        batch_selection_method (str): batch selection strategy to use (highest_landscape | constant_liar | kriging_believer | local_penalization).
+        batch_selection_params (dict): parameters for the batch selection strategy (see documentation for details).
         penalization_params (tuple[float, float], optional): penalization parameters for the landscape. Defaults to (0.25, 1.0).
-        sampling_mode (str, optional): sampling mode for the landscape. Defaults to 'voronoi'.
 
     Returns:
         tuple[list[int], np.ndarray]: new sampled indexes and the landscapes of the acquisition function.
     """
 
     # init variables
+    y_best = np.max(y_train)
     X_candidates_indexes = np.arange(0,len(X_candidates))
     X_train_copy = X_train.copy()
+    y_train_copy = y_train.copy()
 
     sampled_new_idx = []
     landscape_list = []
@@ -256,7 +257,6 @@ def sampling_block(
     for acp in acquisition_params:
         acqui_param = acp.copy()
         n_points_per_style = acqui_param['n_points']
-        percentile = acqui_param.pop('percentile')
 
         # if acquisition mode is "random", sample random points and continue
         if acqui_param['acquisition_mode'] == 'random':
@@ -275,14 +275,9 @@ def sampling_block(
             assert n_points_per_style == 1, "Number of points must be 1 when using maximum_predicted_value acquisition mode."
 
         acqui_func = AcquisitionFunction(y_best=y_best, **acqui_param)
+        # Compute pure landscape for possible output/analysis (batch methods can modify it)
         landscape = acqui_func.landscape_acquisition(X_candidates=X_candidates, ml_model=ml_model)
-        # check the shape of the landscape and ravel if necessary
-        if len(landscape.shape) > 1 and landscape.shape[1] == 1:
-            landscape = landscape.ravel()
-        elif len(landscape.shape) > 1 and landscape.shape[1] > 1:
-            raise ValueError("Landscape shape is multi dimensional. "
-            "Expected 1D array or 2D array with single column. "
-            "Multi output acquisition functions are not supported.")
+        landscape = landscape_sanity_check(landscape)
 
         # skip if acquisition mode is maximum_predicted_value
         if acqui_func.acquisition_mode == 'maximum_predicted_value':
@@ -292,35 +287,38 @@ def sampling_block(
             X_train_copy = np.concatenate([X_train_copy, X_candidates[[acq_mpv_ndx]]])
             continue
 
+        # Append the landscape for analysis
+        landscape_list.append(landscape)
+
+        # Generic penalization of the landscape to add soft avoidance of sampled points
+        # Generally can be skipped for batch methods that have their own penalization
         if penalization_params:
             radius, strength = penalization_params
-            penalized_landscape = penalize_landscape_fast(
+            landscape = penalize_landscape_fast(
                 landscape=landscape,
                 X_candidates=X_candidates,
                 X_train=X_train_copy,
                 radius=radius, strength=strength,
             )
-        else:
-            penalized_landscape = landscape
 
-        # TODO: add here option for batch selection methods (e.g., CL, etc.)
-        # TODO: write functional form for batch selection methods to clean up the code
-        acq_landscape_ndx = highest_landscape_selection(landscape=penalized_landscape, percentile=percentile)
-        X_acq_landscape = X_candidates[acq_landscape_ndx]
-        X_acq_landscape_indexes = X_candidates_indexes[acq_landscape_ndx]
-
-        sampled_hls_idx = sample_landscape(
-            X_landscape=X_acq_landscape, 
-            n_points=n_points_per_style, 
-            sampling_mode=sampling_mode
+        # Batch selection strategy
+        batch_selector = BatchSelectionStrategy(
+            strategy_mode=batch_selection_method,
+            strategy_params=batch_selection_params
+        )
+        sampled_idx_tmp = batch_selector.batch_acquire(
+            X_candidates=X_candidates,
+            model=ml_model,
+            acquisition_function=acqui_func,
+            batch_size=n_points_per_style,
+            X_train=X_train_copy,
+            y_train=y_train_copy,
         )
 
-        sampled_new_idx += list(X_acq_landscape_indexes[sampled_hls_idx])
-        
-        # Append the unpenalized landscape for analysis and possible plotting/output
-        landscape_list.append(landscape)
-
-        X_train_copy = np.concatenate([X_train_copy, X_candidates[sampled_new_idx]])
+        # Stack the sampled indexes and update the training set copy for multiple acquisition loop
+        sampled_new_idx += list(sampled_idx_tmp)
+        # TODO: check if I need to concatenate and update the X_train
+        # X_train_copy = np.concatenate([X_train_copy, X_candidates[sampled_new_idx]])
 
     return sampled_new_idx, np.vstack(landscape_list)
 

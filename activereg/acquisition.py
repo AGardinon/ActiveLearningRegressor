@@ -336,6 +336,148 @@ def landscape_sanity_check(landscape: np.ndarray) -> np.ndarray:
         "Multi output acquisition functions are not supported.")
     
     return landscape
+
+
+class BatchSelectionStrategy:
+    """
+    Batch selection strategy class.
+    """
+    def __init__(self, strategy_mode: str, **kwargs) -> None:
+        """Initialize the batch selection strategy.
+
+        Args:
+            strategy_mode (str): The mode of the batch selection strategy.
+
+        kwargs: Additional parameters for specific strategies.
+        Parameters for different strategies:
+            - Highest Landscape Sampling:
+                - percentile (int): Percentile for highest landscape selection.
+                - sampling_method (str): Sampling method ('random', 'kmeans', 'voronoi').
+            - Constant Liar:
+                - lie_type (str): Type of lie value ('max', 'min', 'mean').
+                - lie_value (float): Specific lie value to use.
+            - Local Penalization:
+                - L (float): Lipschitz constant.
+                - alpha (float): Penalization strength.
+        """
+        self.strategy_mode = strategy_mode
+        self.modes = ['highest_landscape', 
+                      'constant_liar', 
+                      'kriging_believer',
+                      'local_penalization']
+        assert strategy_mode in self.modes, f'Function "{strategy_mode}" not implemented, choose from {self.modes}'
+        # additional parameters
+        self.percentile = kwargs.get('percentile', 95)
+        self.sampling_method = kwargs.get('sampling_method', 'voronoi')
+        self.lie_type = kwargs.get('lie_type', 'max')
+        self.lie_value = kwargs.get('lie_value', None)
+        self.L = kwargs.get('L', 1.0)
+        self.alpha = kwargs.get('alpha', 1.0)
+
+    def batch_acquire(
+        self,
+        X_candidates: np.ndarray,
+        model: MLModel,
+        acquisition_function: AcquisitionFunction,
+        batch_size: int,
+        #
+        X_train: np.ndarray = None,
+        y_train: np.ndarray = None
+    ) -> np.ndarray:
+        """Perform batch acquisition based on the selected strategy.
+
+        Args:
+            X_candidates (np.ndarray): Candidate points.
+            model (MLModel): Machine learning model.
+            acquisition_function (AcquisitionFunction): Acquisition function instance.
+            batch_size (int): Number of points to acquire.
+            X_train (np.ndarray, optional): Training input points. Defaults to None.
+            y_train (np.ndarray, optional): Training target values. Defaults to None.
+
+        Returns:
+            np.ndarray: Indices of selected points.
+        """
+        if self.strategy_mode == 'highest_landscape':
+            return batch_highest_landscape(
+                X_candidates=X_candidates,
+                model=model,
+                acquisition_function=acquisition_function,
+                batch_size=batch_size,
+                percentile=self.percentile,
+                sampling_method=self.sampling_method
+            )
+        
+        elif self.strategy_mode == 'constant_liar':
+            if self.lie_value is None:
+                # Determine lie value based on lie type
+                if self.lie_type == 'max':
+                    _, mu, _ = model.predict(X_candidates)
+                    self.lie_value = np.max(mu)
+                elif self.lie_type == 'min':
+                    _, mu, _ = model.predict(X_candidates)
+                    self.lie_value = np.min(mu)
+                elif self.lie_type == 'mean':
+                    _, mu, _ = model.predict(X_candidates)
+                    self.lie_value = np.mean(mu)
+                else:
+                    raise ValueError(f'Lie type "{self.lie_type}" not recognized. Choose from "max", "min", "mean".')
+                
+            return batch_constant_liar(
+                X_candidates=X_candidates,
+                model=model,
+                acquisition_function=acquisition_function,
+                batch_size=batch_size,
+                X_train=X_train,
+                y_train=y_train,
+                lie_value=self.lie_value
+            )
+        
+        elif self.strategy_mode == 'kriging_believer':
+            return batch_kriging_believer(
+                X_candidates=X_candidates,
+                model=model,
+                acquisition_function=acquisition_function,
+                batch_size=batch_size,
+                X_train=X_train,
+                y_train=y_train
+            )
+        
+        elif self.strategy_mode == 'local_penalization':
+            return batch_local_penalization(
+                X_candidates=X_candidates,
+                model=model,
+                acquisition_function=acquisition_function,
+                batch_size=batch_size,
+                L=self.L,
+                alpha=self.alpha
+            )
+        
+    def __str__(self) -> str:
+        return f'BatchSelectionStrategy(strategy_mode={self.strategy_mode})'
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    def get_params(self) -> dict:
+        param_dict = {
+            'strategy_mode': self.strategy_mode,
+            'percentile': self.percentile,
+            'sampling_method': self.sampling_method,
+            'lie_type': self.lie_type,
+            'lie_value': self.lie_value,
+            'L': self.L,
+            'alpha': self.alpha
+        }
+        if self.strategy_mode != 'highest_landscape':
+            param_dict.pop('percentile')
+            param_dict.pop('sampling_method')
+        if self.strategy_mode != 'constant_liar':
+            param_dict.pop('lie_type')
+            param_dict.pop('lie_value')
+        if self.strategy_mode != 'local_penalization':
+            param_dict.pop('L')
+            param_dict.pop('alpha')
+        return param_dict
     
 
 # Highest landscape hypersurface sampling
@@ -358,9 +500,8 @@ def batch_highest_landscape(
         percentile (int): Percentile for highest landscape selection.
         sampling_method (str, optional): Sampling method. Defaults to 'voronoi'.
     Returns:
-        np.ndarray: Indices of selected points.
+        np.ndarray: Indices of selected points, referred to the original candidate set.
     """
-    
     # Make a copy to avoid modifying original data
     X_candidates_tmp = X_candidates.copy()
 
@@ -410,7 +551,7 @@ def batch_constant_liar(
         y_train (np.ndarray): Training target values.
         lie_value (float, optional): Lie value to use. Defaults to None.
     Returns:
-        np.ndarray: Indices of selected points.
+        np.ndarray: Indices of selected points, referred to the original candidate set.
     """
     selected_indices = []
     
@@ -477,7 +618,7 @@ def batch_kriging_believer(
         y_train (np.ndarray): Training target values.
 
     Returns:
-        np.ndarray: Indices of selected points.
+        np.ndarray: Indices of selected points, referred to the original candidate set.
     """
     sampled_new_idx = []
     
@@ -538,7 +679,7 @@ def batch_local_penalization(
         alpha (float, optional): Penalization strength. Defaults to 1.0.
 
     Returns:
-        np.ndarray: Indices of selected points.
+        np.ndarray: Indices of selected points, referred to the original candidate set.
     """
     selected_indices = []
     selected_points = []

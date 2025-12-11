@@ -254,7 +254,7 @@ if __name__ == '__main__':
     batch_selection_config = config.get('batch_selection', None)
     if batch_selection_config is not None:
         batch_selection_method = batch_selection_config.get('method', 'highest_landscape')
-        batch_selection_params = batch_selection_config.get('method_params', None)
+        batch_selection_params = batch_selection_config.get('method_params') or {}
         print(f"Batch selection strategy: {batch_selection_method} with params: {batch_selection_params}")
     else:
         raise ValueError("Batch selection configuration must be provided in the config file, with at least the method defined.")

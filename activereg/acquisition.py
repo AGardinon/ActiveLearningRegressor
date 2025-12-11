@@ -342,13 +342,13 @@ class BatchSelectionStrategy:
     """
     Batch selection strategy class.
     """
-    def __init__(self, strategy_mode: str, **kwargs) -> None:
+    def __init__(self, strategy_mode: str, strategy_params: dict) -> None:
         """Initialize the batch selection strategy.
 
         Args:
             strategy_mode (str): The mode of the batch selection strategy.
 
-        kwargs: Additional parameters for specific strategies.
+        strategy_params (dict): Additional parameters for specific strategies.
         Parameters for different strategies:
             - Highest Landscape Sampling:
                 - percentile (int): Percentile for highest landscape selection.
@@ -367,12 +367,12 @@ class BatchSelectionStrategy:
                       'local_penalization']
         assert strategy_mode in self.modes, f'Function "{strategy_mode}" not implemented, choose from {self.modes}'
         # additional parameters
-        self.percentile = kwargs.get('percentile', 95)
-        self.sampling_method = kwargs.get('sampling_method', 'voronoi')
-        self.lie_type = kwargs.get('lie_type', 'max')
-        self.lie_value = kwargs.get('lie_value', None)
-        self.L = kwargs.get('L', 1.0)
-        self.alpha = kwargs.get('alpha', 1.0)
+        self.percentile = strategy_params.get('percentile', 95)
+        self.sampling_method = strategy_params.get('sampling_method', 'voronoi')
+        self.lie_type = strategy_params.get('lie_type', 'max')
+        self.lie_value = strategy_params.get('lie_value', None)
+        self.L = strategy_params.get('L', 1.0)
+        self.alpha = strategy_params.get('alpha', 1.0)
 
     def batch_acquire(
         self,
@@ -521,7 +521,7 @@ def batch_highest_landscape(
     sampled_indices = sample_landscape(
         X_landscape=X_candidates_selected,
         n_points=batch_size,
-        method=sampling_method
+        sampling_mode=sampling_method
     )
     sampled_new_indices = X_candidates_selected_indices[sampled_indices]
 
@@ -585,8 +585,8 @@ def batch_constant_liar(
             y_lie = np.array([lie_value], dtype=float)
 
         # Update the temporary training set with the selected point and lie value
-        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[best_idx]])
-        y_train_copy = np.hstack([y_train_copy, y_lie])
+        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[best_idx]])  #! shapes are (N,d) and (d,)
+        y_train_copy = np.vstack([y_train_copy, y_lie])  #! shapes are (N,d) and (d,)
 
         # Retrain the model with the updated training set
         model_copy.train(X_train_copy, y_train_copy)
@@ -645,8 +645,8 @@ def batch_kriging_believer(
         y_believe = mu_best[0]
 
         # Update the temporary training set with the selected point and believed value
-        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[sampled_hls_idx]])
-        y_train_copy = np.hstack([y_train_copy, y_believe])
+        X_train_copy = np.vstack([X_train_copy, X_candidates_copy[sampled_hls_idx]])  #! shapes are (N,d) and (d,)
+        y_train_copy = np.vstack([y_train_copy, y_believe])  #! shapes are (N,d) and (d,)
 
         # Retrain the model with the updated training set
         model_copy.train(X_train_copy, y_train_copy)

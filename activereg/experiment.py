@@ -303,8 +303,8 @@ def sampling_block(
 
         # Batch selection strategy
         batch_selector = BatchSelectionStrategy(
-            method=batch_selection_method,
-            **batch_selection_params
+            strategy_mode=batch_selection_method,
+            strategy_params=batch_selection_params
         )
         sampled_idx_tmp = batch_selector.batch_acquire(
             X_candidates=X_candidates,
@@ -317,7 +317,8 @@ def sampling_block(
 
         # Stack the sampled indexes and update the training set copy for multiple acquisition loop
         sampled_new_idx += list(sampled_idx_tmp)
-        X_train_copy = np.concatenate([X_train_copy, X_candidates[sampled_new_idx]])
+        # TODO: check if I need to concatenate and update the X_train
+        # X_train_copy = np.concatenate([X_train_copy, X_candidates[sampled_new_idx]])
 
     return sampled_new_idx, np.vstack(landscape_list)
 

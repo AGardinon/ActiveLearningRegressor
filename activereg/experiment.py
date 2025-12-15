@@ -140,10 +140,12 @@ def setup_ml_model(config: dict) -> regmodels.MLModel:
         return create_gpr_instance(ml_model_params)
     elif ml_model_type == 'AnchoredEnsembleMLP':
         return create_anchored_ensemble_mlp(ml_model_params)
+    elif ml_model_type == 'kNNRegressor':
+        return create_knn_instance(ml_model_params)
     elif ml_model_type == 'BayesianNN':
         return create_bnn_instance(ml_model_params)
     else:
-        raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP', 'BayesianNN'].")
+        raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP', 'kNNRegressor', 'BayesianNN'].")
 
 
 def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:
@@ -193,6 +195,23 @@ def create_anchored_ensemble_mlp(model_parameters: dict) -> regmodels.MLModel:
         regmodels.MLModel: The created Anchored Ensemble MLP instance.
     """
     return regmodels.AnchoredEnsembleMLP(**model_parameters)
+
+
+def create_knn_instance(model_parameters: dict) -> regmodels.MLModel:
+    """Creates a k-Nearest Neighbors Regressor instance with Active Learning capabilities.
+    Dictionary must contain the following keys:
+        - k (int): Number of neighbors to use.
+        - length_scale (float): Length scale for distance metric. Default is 1.0.
+        - noise_floor (float): Noise floor to add to distance metric. Default is 1e-6.
+        - distance_penalty (float): Penalty factor for distance in acquisition function. Default is 0.0.
+
+    Args:
+        model_parameters (dict): Configuration dictionary containing model parameters.
+
+    Returns:
+        regmodels.MLModel: The created k-Nearest Neighbors Regressor instance.
+    """
+    return regmodels.kNNRegressorAL(**model_parameters)
 
 
 def create_bnn_instance(model_parameters: dict) -> regmodels.MLModel:

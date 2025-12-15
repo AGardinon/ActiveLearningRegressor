@@ -293,7 +293,7 @@ class kNNRegressorAL:
 
     def train(self, X: np.ndarray, y: np.ndarray) -> None:
         self.X_train = np.asarray(X)
-        self.y_train = np.asarray(y)
+        self.y_train = np.asarray(y).ravel()
 
     def _weights(self, distances: np.ndarray) -> np.ndarray:
         w = np.exp(-(distances ** 2) / (self.length_scale ** 2))
@@ -307,9 +307,13 @@ class kNNRegressorAL:
 
         # Pairwise distances to training data
         distances = cdist(X, self.X_train)
+        
+        # Explicit effective k (in case k > n_train)
+        k_eff = min(self.k, self.X_train.shape[0])
 
         # Extract neighbor distances and values
-        knn_idx = np.argsort(distances, axis=1)[:, : self.k]
+        knn_idx = np.argsort(distances, axis=1)[:, :k_eff]
+
         knn_distances = np.take_along_axis(distances, knn_idx, axis=1)
         knn_targets = self.y_train[knn_idx]
 

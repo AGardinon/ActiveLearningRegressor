@@ -228,10 +228,10 @@ def plot_sample_efficiency(
             rep_metrics = metrics_df[metrics_df['repetition'] == rep].sort_values('cycle')
             rep_points = points_df[points_df['repetition'] == rep].sort_values('cycle')
             
-            # Count cumulative samples per cycle
+            # Count cumulative samples per cycle for only cycle >= 1
             cumulative_samples = []
             for cycle in rep_metrics['cycle'].values:
-                n_samples = len(rep_points[rep_points['cycle'] <= cycle])
+                n_samples = len(rep_points[rep_points['cycle'] <= cycle]) - len(rep_points[rep_points['cycle'] == 0])
                 cumulative_samples.append(n_samples)
 
             values = rep_metrics[value_col].values * y_scaling_value
@@ -417,13 +417,13 @@ def plot_batch_diversity_over_time(
                         mean_div + std_div,
                         alpha=0.15, color=colors[len(ax.lines)-1])
     
-    ax.set_xlabel('Experiment Completion (%)', fontsize=12)
-    ax.set_ylabel('Mean Pairwise Distance in Batch', fontsize=12)
-    ax.set_title('Batch Diversity Over Experiment Progress', fontsize=12)
-    ax.set_xlim([-5, 105])
-    ax.legend(fontsize=10, loc='best')
-    ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+    # ax.set_xlabel('Experiment Completion (%)', fontsize=12)
+    # ax.set_ylabel('Mean Pairwise Distance in Batch', fontsize=12)
+    # ax.set_title('Batch Diversity Over Experiment Progress', fontsize=12)
+    # ax.set_xlim([-5, 105])
+    # ax.legend(fontsize=10, loc='best')
+    # ax.grid(True, alpha=0.3)
+    # fig.tight_layout()
     return fig, ax
 
 
@@ -854,12 +854,13 @@ def plot_metric_at_milestones_with_stats(
 # --- PLOT UTILITIES
 
 
-def prepare_multiple_experiments(experiment_paths: List[str]) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
+def prepare_multiple_experiments(experiment_paths: List[str], base_path: str) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
     """
     Load multiple experiments for comparison.
     
     Args:
         experiment_paths: {exp_name: (points_csv_path, metrics_csv_path)}
+        base_path: Base path to prepend to experiment paths.
     
     Returns:
         {exp_name: (points_df, metrics_df)}
@@ -869,8 +870,8 @@ def prepare_multiple_experiments(experiment_paths: List[str]) -> Dict[str, Tuple
 
     experiments = {}
     for exp_name in experiment_paths:
-        points_df = pd.read_csv(Path(exp_name) / POINTS_PATHS)
-        metrics_df = pd.read_csv(Path(exp_name) / METRICS_PATHS)
+        points_df = pd.read_csv(Path(base_path) / exp_name / POINTS_PATHS)
+        metrics_df = pd.read_csv(Path(base_path) / exp_name / METRICS_PATHS)
         experiments[exp_name] = (points_df, metrics_df)
     return experiments
 

@@ -5,9 +5,10 @@ import shutil
 import numpy as np
 from torch import Tensor
 from torch.utils.data import TensorDataset, DataLoader
+from scipy.spatial import cKDTree
 from pathlib import Path
 from datetime import datetime
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Literal
 
 # --------------------------------------------------------------------------------
 # EXPERIMENTS
@@ -96,6 +97,43 @@ def sinusoidal_landscape(X: np.ndarray, noise_level: float=0.1) -> np.ndarray:
     """
     noise = noise_level * np.random.randn(X.shape[0])  # Optional noise
     return np.sum(np.sin(X), axis=1) + noise
+
+# --------------------------------------------------------------------------------
+# DISTANCES & NEIGHBORS
+
+def compute_knn_distance(
+    X: np.ndarray,
+    method: Literal["median_nn", "mean_nn"] = "median_nn",
+    k_neighbors: int = 5,
+) -> float:
+    """
+    Compute a reference distance scale for threshold setting.
+
+    Args:
+        X: (N, d) array of existing training points (can be candidates too).
+        method: "median_nn" | "mean_nn"
+            - "median_nn": median distance to nearest neighbor
+            - "mean_nn": mean distance to nearest neighbor
+
+    Returns:
+        float: The computed distance scale.
+    """
+    if X is None or len(X) < 2:
+        raise ValueError("At least 2 points are required to compute kNN distance.")
+
+    if method in ("median_nn", "mean_nn"):
+        tree = cKDTree(X)
+        # query k=k_neighbors because first neighbor is the point itself
+        dists, _ = tree.query(X, k=k_neighbors)  # shape (N, k_neighbors)
+        # dists[:,0] is zero (self), dists[:,1] is nearest neighbor
+        nn = dists[:, 1]
+        if method == "median_nn":
+            return float(np.median(nn))
+        else:
+            return float(np.mean(nn))
+        
+    else:
+        raise ValueError(f"Unknown method {method}")
 
 # --------------------------------------------------------------------------------
 # FOLDERS & FILES

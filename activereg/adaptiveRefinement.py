@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 from activereg.data import DatasetGenerator
+from activereg.utils import compute_knn_distance
 from scipy.spatial import cKDTree
 from typing import Literal
 
@@ -53,6 +54,7 @@ def select_centers_from_batch(
 
 # ---
 # Compute half-side length for the hypercube
+# TODO: consider adding a `fixed-decay` option for decreasing the half-side length over iterations
 
 def get_hypercube_half_side(
     centroid: np.ndarray,           # shape (1, n_dims)
@@ -89,7 +91,7 @@ def get_hypercube_half_side(
         dists = np.linalg.norm(pool_scaled - centroid_flat, axis=1)
         knn_dists = np.sort(dists)[1:k_neighbors+1]  # exclude self if centroid is in pool
         mean_knn_dist = np.mean(knn_dists)
-        global_mean_knn_dist = compute_global_mean_knn_dist(pool_scaled, k=k_neighbors)
+        global_mean_knn_dist = compute_knn_distance(pool_scaled, k_neighbors=k_neighbors)
         half_side = density_scale * min(mean_knn_dist, 2.0 * global_mean_knn_dist)
 
     # Clip to reasonable range

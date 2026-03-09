@@ -10,12 +10,14 @@ from typing import Literal
 # --------------------------------------------------------------
 # Adaptive refinement functions
 
+# TODO: ?
+# class AdaptiveRefinement:
+
 # ---
 # Select a subset of the AL batch to serve as hypercube centers for refinement.
 
 def select_centers_from_batch(
-    sampled_new_idx: np.ndarray,
-    pool_scaled: np.ndarray,
+    candidate_points: np.ndarray,
     n_centers: int = 4,
     min_centers: int = 2,
 ) -> np.ndarray:
@@ -32,14 +34,13 @@ def select_centers_from_batch(
         np.ndarray: Indices of the selected hypercube centers.
     """
     
-    n_centers = max(min_centers, min(n_centers, len(sampled_new_idx)))
+    n_centers = max(min_centers, min(n_centers, len(candidate_points)))
     
     # No reduction needed if batch is already at or below target
-    if len(sampled_new_idx) <= n_centers:
-        return sampled_new_idx
+    if len(candidate_points) <= n_centers:
+        return candidate_points
     
     # Otherwise greedy maximin reduction
-    candidate_points = pool_scaled[sampled_new_idx]
     selected = [0]
     for _ in range(n_centers - 1):
         selected_points = candidate_points[selected]
@@ -50,7 +51,7 @@ def select_centers_from_batch(
         dists[selected] = -np.inf
         selected.append(np.argmax(dists))
     
-    return sampled_new_idx[selected]
+    return candidate_points[selected]
 
 # ---
 # Compute half-side length for the hypercube
@@ -73,6 +74,10 @@ def get_hypercube_half_side(
 
     Args:
         centroid (np.ndarray): Centroid of the hypercube (array of shape (1, n_dimensions) in the reduced space).
+        pool_scaled (np.ndarray): Scaled pool of points from which the samples are drawn (shape (N, n_dimensions)).
+        strategy (str, optional): Strategy to determine the half-side length of the hypercube. Defaults to 'density'.
+         - 'fixed': use a fixed fraction of the space extent as the half-side length.
+         - 'density': adapt the half-side length based on the local density of points in the pool, using the mean distance to the k nearest neighbors.
         base_fraction (float, optional): Fraction of space extent to start with for the fixed strategy. Defaults to 0.1.
         density_scale (float, optional): Multiplier on mean kNN distance to determine half-side length. Defaults to 0.5.
         max_half_side (float, optional): Maximum allowed half-side length. Defaults to 0.5.
@@ -98,18 +103,21 @@ def get_hypercube_half_side(
     half_side = float(np.clip(half_side, min_half_side, max_half_side))
     return half_side
 
-#
+# ---
+# Create hypercube bounds and generate points within it for refinement
 
 def pointwise_hypercube_refinement(
     refine_generator: DatasetGenerator,
     design_bounds: np.ndarray,
     design_dimensions: int,
-    refine_centroid: np.ndarray, 
-    half_side_length: float, 
+    refine_centroid: np.ndarray,
+    pool_scaled: np.ndarray,
     n_points: int,
     refine_noise_std: float,
     scaler,
     refine_function,
+    half_side_length_strategy: Literal['fixed', 'density'] = 'density',
+    hsl_strategy_params: dict = None,
     refine_method: str = 'lhs'
 ) -> pd.DataFrame:
     """Generate new candidate points within a hypercube centered at a given centroid.
@@ -117,7 +125,7 @@ def pointwise_hypercube_refinement(
     Args:
         refine_generator (DatasetGenerator): DatasetGenerator instance for generating points.
         refine_centroid (np.ndarray): Centroid of the hypercube (array of shape (1, n_dimensions) in the reduced space).
-        half_side_length (float): Half the length of the hypercube's side.
+        half_side_length_strategy (str, optional): Strategy to determine the half-side length of the hypercube. Defaults to 'density'.
         n_points (int): Number of points to generate within the hypercube.
         refine_noise_std (float): Standard deviation of noise to add to the function evaluations.
         scaler (_type_): Scaler used to inverse transform the hypercube bounds.
@@ -132,6 +140,14 @@ def pointwise_hypercube_refinement(
     # Inverse transform the centroid to the original space
     refine_centroid_orig = scaler.inverse_transform(refine_centroid)
     
+    # Compute the half-side length of the hypercube based on the selected strategy
+    half_side_length = get_hypercube_half_side(
+        centroid=refine_centroid,
+        pool_scaled=pool_scaled,
+        strategy=half_side_length_strategy,
+        **(hsl_strategy_params or {})
+    )
+
     # Scale the half_side_length to each dimension based on the scaler
     half_side_length_dimwise = half_side_length * scaler.scale_
 
@@ -161,8 +177,10 @@ def pointwise_hypercube_refinement(
 
     return refined_df
 
-
+# ---
+# Filter out points that are too close to existing points in the pool and optionally filter internal duplicates
 # TODO: possibility to used adaptive min_distance based on points-to-keep thresholding
+
 def filter_refined_additions(
     X_addition: np.ndarray,
     X_existing: np.ndarray,

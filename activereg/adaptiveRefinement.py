@@ -166,27 +166,38 @@ def pointwise_hypercube_refinement(
 def filter_refined_additions(
     X_addition: np.ndarray,
     X_existing: np.ndarray,
-    min_distance: float
+    min_distance: float,
+    filter_internal: bool = False
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Filter out points from X_addition that are too close to the X_existing points and 
-    return the filtered points with the indices of the points that were kept.
+    """Filter out points from X_addition that are too close to the X_existing points and optionally filter internal duplicates.
 
     Args:
         X_addition (np.ndarray): Points proposed for addition.
         X_existing (np.ndarray): Existing points to compare against.
         min_distance (float): Minimum allowable distance from existing points.
+        filter_internal (bool, optional): If True, also filter out points that are too close to each other within X_addition. Defaults to False.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: Filtered points and their indices.
     """
+
+    # Filter against existing pool
     tree = cKDTree(X_existing)
-    filtered_points = []
-    filtered_indices = []
+    dists, _ = tree.query(X_addition, k=1)
+    mask = dists >= min_distance
+    candidates = X_addition[mask]
+    candidate_indices = np.where(mask)[0]
 
-    for idx, point in enumerate(X_addition):
-        dist, _ = tree.query(point, k=1)
+    if not filter_internal or len(candidates) == 0:
+        return candidates, candidate_indices
+
+    # Greedy filter for intra-addition duplicates
+    kept = [0]
+    for i in range(1, len(candidates)):
+        tree_kept = cKDTree(candidates[kept])
+        dist, _ = tree_kept.query(candidates[i], k=1)
         if dist >= min_distance:
-            filtered_points.append(point)
-            filtered_indices.append(idx)
+            kept.append(i)
 
-    return np.array(filtered_points), np.array(filtered_indices)
+    kept = np.array(kept)
+    return candidates[kept], candidate_indices[kept]

@@ -30,10 +30,11 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-from activereg.data import (DatasetGenerator,
-                            compute_reference_distance,
-                            pointwise_hypercube_refinement,
-                            filter_refined_additions)
+from activereg.data import DatasetGenerator
+from activereg.adaptiveRefinement import (select_centers_from_batch,
+                                          get_hypercube_half_side,
+                                          pointwise_hypercube_refinement,
+                                          filter_refined_additions)
 from activereg.metrics import evaluate_cycle_metrics
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
@@ -230,7 +231,7 @@ if __name__ == '__main__':
     # Set up and apply the data scaler on the complete search space
     data_scaler = data_scaler_setup(config)
     X_pool, data_scaler = setup_data_pool(df=pool_df, search_var=SEARCH_VAR, scaler=data_scaler)
-    X_pool_reference_distance = compute_reference_distance(X=X_pool, method="median_nn")
+    # X_pool_reference_distance = compute_reference_distance(X=X_pool, method="median_nn")
     joblib.dump(data_scaler, scaler_path)
 
     # Create candidates dataframe (candidates_df -> unscreened space)
@@ -294,7 +295,9 @@ if __name__ == '__main__':
         refine_step = refinement_config.get('refinement_step', 20)
         refine_centroids = refinement_config.get('refinement_centroids', 5)
         refine_batch_size = refinement_config.get('refinement_batch_size', 500)
-        centroids_selection_method = refinement_config.get('centroids_selection_method', 'fps')
+        half_side_length_strategy = refinement_config.get('half_side_length_strategy', 'density')
+        half_side_length_strategy_params = refinement_config.get('half_side_length_strategy_params', {})
+        refinement_filtering_min_distance = refinement_config.get('refinement_filtering_min_distance', 0.0001)
 
         print(f"Adaptive refinement activated every {refine_step} points acquired, "
               f"with {refine_centroids} centroids and adding {refine_batch_size} points per centroids.")
@@ -433,6 +436,7 @@ if __name__ == '__main__':
 
             # --------------------------------------------------------------------------------
             # Adaptive refinement of candidates pool if defined in the config file
+            # TODO: consider refactoring into a class or function for better readability and modularity
             if refine_generator is not None:
 
                 # TODO: check for possible inconsistencies in the countig of acquired points
@@ -440,26 +444,12 @@ if __name__ == '__main__':
                 if n_points_acquired >= next_refine_target:
                     refine_counter += 1
 
-                    # Compute the reference distance on the training set and determine the half–side-length of the hypercube
-                    nn_ref_distance = compute_reference_distance(X=X_train, method="median_nn")
-                    half_side_hyperc_length = nn_ref_distance
-
-                    # Accumulate the seed (size of refine_step) of the refinement points from the top predicted candidates so far
-                    highest_prediction_ndx = highest_landscape_selection(
-                        landscape=y_pred_pool,
-                        percentile=90,
-                        min_points=100,
-                        max_points=1000
+                    # From the current `sampled_indexes` select the hypercube centres
+                    X_centroids_refinement = select_centers_from_batch(
+                        candidate_points=X_train,
+                        n_centers=refine_centroids,
+                        min_centers=2
                     )
-                    X_seed_refinement = X_pool[highest_prediction_ndx]  # Based on highest predicted values in the pool
-
-                    # Compress the seed points to just the centroids via Farthest Point Sampling (FPS)
-                    centroids_ndx = sample_landscape(
-                        X_landscape=X_seed_refinement,
-                        n_points=refine_centroids,
-                        sampling_mode=centroids_selection_method
-                    )
-                    X_centroids_refinement = X_seed_refinement[centroids_ndx]
 
                     # Generate new candidates around each centroid
                     refined_df = pd.DataFrame()
@@ -469,7 +459,9 @@ if __name__ == '__main__':
                             design_bounds=refine_function_bounds,
                             design_dimensions=refine_function_dim,
                             refine_centroid=np.reshape(centroid, (1, -1)),  # reshape to (1, D)
-                            half_side_length=half_side_hyperc_length,
+                            pool_scaled=X_pool,
+                            half_side_length_strategy=half_side_length_strategy,
+                            hsl_strategy_params=half_side_length_strategy_params,
                             n_points=refine_batch_size,
                             refine_noise_std=refine_noise_std,
                             scaler=data_scaler,
@@ -490,7 +482,8 @@ if __name__ == '__main__':
                     X_pool_refined_filtered, filtered_indexes = filter_refined_additions(
                         X_addition=X_refined_scaled,
                         X_existing=X_pool,
-                        min_distance=X_pool_reference_distance * 0.5
+                        min_distance=refinement_filtering_min_distance,
+                        filter_internal=True
                     )
                     y_refined_filtered = y_pool_refined[filtered_indexes]
 
@@ -512,7 +505,8 @@ if __name__ == '__main__':
                         X_val_refined_filtered, val_filtered_indexes = filter_refined_additions(
                             X_addition=X_val_refined_scaled,
                             X_existing=X_val,
-                            min_distance=X_pool_reference_distance * 0.5
+                            min_distance=refinement_filtering_min_distance,
+                            filter_internal=True
                         )
                         y_val_refined_filtered = y_val_refined[val_filtered_indexes]
 

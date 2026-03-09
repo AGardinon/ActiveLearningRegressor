@@ -4,14 +4,9 @@ import torch
 import numpy as np
 import pandas as pd
 from scipy.stats import qmc
-from scipy.spatial import cKDTree
-from sklearn.preprocessing import MinMaxScaler
-from typing import Literal
 
 # --------------------------------------------------------------
 # Dataset generation functions
-
-# TODO: remove y_scaling as it might lead to errors in the overall process and in the refinement steps
 
 class DatasetGenerator:
 

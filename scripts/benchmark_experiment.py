@@ -31,14 +31,12 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 from activereg.data import DatasetGenerator
-from activereg.adaptiveRefinement import (select_centers_from_batch,
-                                          get_hypercube_half_side,
-                                          pointwise_hypercube_refinement,
-                                          filter_refined_additions)
 from activereg.metrics import evaluate_cycle_metrics
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
-from activereg.acquisition import highest_landscape_selection
+from activereg.adaptiveRefinement import (select_centers_from_batch,
+                                          pointwise_hypercube_refinement,
+                                          filter_refined_additions)
 from activereg.experiment import (get_gt_dataframes, 
                                   sampling_block, 
                                   setup_data_pool,
@@ -446,7 +444,7 @@ if __name__ == '__main__':
 
                     # From the current `sampled_indexes` select the hypercube centres
                     X_centroids_refinement = select_centers_from_batch(
-                        candidate_points=X_train,
+                        candidate_points=X_train[-next_refine_target:],  # select the last acquired points as candidates for centroids selection
                         n_centers=refine_centroids,
                         min_centers=2
                     )

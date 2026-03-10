@@ -41,7 +41,7 @@ def select_centers_from_batch(
         return candidate_points
     
     # Otherwise greedy maximin reduction
-    selected = [0]
+    selected = np.random.choice(len(candidate_points), size=1, replace=False).tolist()
     for _ in range(n_centers - 1):
         selected_points = candidate_points[selected]
         dists = np.min(

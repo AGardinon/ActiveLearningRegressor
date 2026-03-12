@@ -33,7 +33,7 @@ class DatasetGenerator:
         self.available_methods = ['lhs', 'sobol', 'random']
         self.dimension_names = dim_labels if dim_labels is not None else [f'x{i+1}' for i in range(n_dimensions)]
         self.target_label = target_label if target_label is not None else ['y']
-        self.seed = seed
+        self.seed = seed if seed is not None else np.random.randint(0, 10000)
 
         assert len(bounds) == self.n_dimensions, "Length of bounds must match n_dimensions"
         assert all(isinstance(b, np.ndarray) and len(b) == 2 for b in bounds), "Each bound must be a tuple of (min, max)"
@@ -146,7 +146,7 @@ class DatasetGenerator:
         X_train = self.sample_space(n_samples, method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=self.seed, **kwargs_sampling)
         y_train = self.compute_function_values(X_train, function, noise_std=noise_std, **kwargs_function)
 
-        if val_size > 0.0:
+        if val_size is not None and val_size > 0.0:
             X_val = self.sample_space(int(n_samples * val_size), method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=self.seed+13, **kwargs_sampling)
             y_val = self.compute_function_values(X_val, function, noise_std=noise_std, **kwargs_function)
 
@@ -161,17 +161,20 @@ class DatasetGenerator:
         train_data = pd.DataFrame(X_train, columns=self.dimension_names)
         for i, label in enumerate(self.target_label):
             train_data[label] = y_train[:, i] if len(y_train.shape) > 1 else y_train
-        train_data['set'] = 'train'
+        # train_data['set'] = 'train'
 
-        if val_size > 0.0:
+        if val_size is not None and val_size > 0.0:
+            train_data['set'] = 'train'
             val_data = pd.DataFrame(X_val, columns=self.dimension_names)
             for i, label in enumerate(self.target_label):
                 val_data[label] = y_val[:, i] if len(y_val.shape) > 1 else y_val
             val_data['set'] = 'val'
-        elif val_size == 0.0:
-            val_data = pd.DataFrame(columns=train_data.columns)
 
-        dataset = pd.concat([train_data, val_data], ignore_index=True)
+            dataset = pd.concat([train_data, val_data], ignore_index=True)
+
+        elif val_size == 0.0 or val_size is None:
+            dataset = train_data
+        
         return dataset
 
 

@@ -171,7 +171,7 @@ def pointwise_hypercube_refinement(
         function=refine_function,
         n_samples=n_points,
         method=refine_method,
-        val_size=1.0,
+        val_size=None,
         noise_std=refine_noise_std,
     )
 

@@ -1,43 +1,40 @@
 # ------------------------------------------------------------------------------
 # Benchmark configuration file for Active Learning Regressor experiments
 # ------------------------------------------------------------------------------
-SEED: 13
+SEED: null
 
-experiment_name: "3D/hartmann_gpr_20cy_5pts_1stage_3_2"
-experiment_notes: "Benchmarking the Hartmann 3D function"
+experiment_name: "6D/ackley_gpr_10cy_2pts_1stage_1_1_adaptive_refinement_test_newpipeline"
+experiment_notes: "Benchmarking the Ackley 6D function"
+
+# --------------------------------------------------------------
+# Function settings
+function_parameters:
+  function: "Ackley6D"  # "Hartmann" or "Ackley" or "StyblinskiTang"
+  custom: False  # whether to use a custom function defined in a separate file (if true, the 'function' parameter will be ignored and the function will be imported from the specified file)
+  n_dimensions: null  # number of dimensions of the function (if null, it will be inferred from the bounds or from the ground truth file if provided)
+  bounds: null  # bounds of the function (if null, it will be inferred from the ground truth file if provided or set to default bounds for the selected function)
 
 # --------------------------------------------------------------
 # Ground truth data configuration
-ground_truth_file: "hartmann3d_lhs.csv"
-ground_truth_parameters: null
-  # function: "Hartmann"
-  # n_dimensions: 6
-  # bounds:
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  # n_samples: 5000
-  # val_size: 1.0
-  # method: "lhs"
-  # negate: true
-  # noise_std: 0.0
+ground_truth_file: null #"hartmann3d_lhs.csv"
+experiment_evidence: null
+
+# --------------------------------------------------------------
+# Train set configuration (initial points)
+train_set_parameters:
+  n_samples: 50000
+  method: "lhs"
+  val_size: null
+  negate: true
+  noise_std: 0.0
 
 search_space_variables:
   - "x1"
   - "x2"
   - "x3"
-  # - "x4"
-  # - "x5"
-  # - "x6"
+  - "x4"
+  - "x5"
+  - "x6"
 
 target_variables:
   - "y"
@@ -49,34 +46,25 @@ scaler_params: null
 
 # --------------------------------------------------------------
 # Adaptive refinement configuration
-adaptive_refinement: null # refinement parameters disabled if null
-  # function: "Hartmann"
-  # n_dimensions: 6
-  # bounds:
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   - [0.0, 1.0]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  #   # - [-32.768, 32.768]
-  # method: 'lhs'
-  # negate: true
-  # refinement_noise_std: 0.0
-  # refinement_step: 20  # number of points acquired after which to perform refinement
-  # refinement_centroids: 5  # number of centroids to use for the refinement (chosen via fps)
-  # refinement_batch_size: 200  # number of points to sample around each centroid during refinement
-  # centroids_selection_method: "voronoi"  # "voronoi" or "fps" (farthest point sampling)
+adaptive_refinement: # refinement parameters disabled if null
+  method: 'lhs'  # method to sample the points for the refinement (either 'lhs' or 'sobol')
+  negate: true
+  refinement_noise_std: 0.0
+  refinement_step: 4  # number of points acquired after which to perform refinement
+  refinement_centroids: 3  # number of centroids to use for the refinement (chosen via fps)
+  refinement_batch_size: 500  # number of points to sample around each centroid during refinement
+  half_side_length_strategy: 'density'  # strategy to determine the half-side length of the hypercube around each centroid (either 'fixed' or 'density')
+  half_side_length_strategy_params:  # parameters for the half-side length strategy (if using 'fixed', provide 'base_fraction'; if using 'density', provide 'density_scale' and 'max_half_side')
+    base_fraction: 0.3
+    k_neighbors: 5
+    density_scale: 0.5
+    max_half_side: 0.5
+  refinement_filtering_min_distance: 0.0001  # minimum distance from existing points for refined points to be kept (in the scaled space)
 
 # --------------------------------------------------------------
 # Cycles parameters
-n_cycles: 20
-init_batch_size: 5
+n_cycles: 10
+init_batch_size: 2
 init_sampling: "random"
 
 # --------------------------------------------------------------
@@ -124,9 +112,9 @@ batch_selection:
 # Multi-stage acquisition protocol configuration
 acquisition_protocol:
   stage_1:
-    cycles: 20
+    cycles: 100
     acquisition_modes: ['exploration_mutual_info', 'expected_improvement']
-    n_points: [3, 2]  # Number of points to acquire for each mode in stage 1
+    n_points: [1, 1]  # Number of points to acquire for each mode in stage 1
   # stage_2:
   #   cycles: 40
   #   acquisition_modes: ['expected_improvement']

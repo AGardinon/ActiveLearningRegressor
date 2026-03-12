@@ -1,0 +1,11 @@
+# ------------------------------------------------------------------------------
+# KNN Regressor configuration file for in-silico experiment
+# ------------------------------------------------------------------------------
+
+ml_model: "kNNRegressor"
+
+model_parameters:
+  k : 10
+  length_scale : 1.0
+  noise_floor : 0.000001
+  distance_penalty : 0.0

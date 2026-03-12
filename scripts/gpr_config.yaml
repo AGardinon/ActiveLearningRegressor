@@ -1,0 +1,14 @@
+# ------------------------------------------------------------------------------
+# GPR configuration file for in-silico experiment
+# ------------------------------------------------------------------------------
+
+ml_model: "GPR"
+
+model_parameters:
+  kernel_recipe: "MATERN_W"  # "RBF_W" or "MATERN_W" or custom recipe
+  n_restarts_optimizer: 300
+  alpha: 1e-10
+  normalize_y: true
+  optimizer: 'fmin_l_bfgs_b'
+  use_gridsearch: false
+  log_transform: false

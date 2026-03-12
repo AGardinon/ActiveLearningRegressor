@@ -114,13 +114,22 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------
     # Parse the config.yaml
     parser = argparse.ArgumentParser(description="Read a YAML config file.")
-    parser.add_argument("-c", "--config", required=True, help="Path to the YAML configuration file")
+    parser.add_argument("-bc", "--benchmark_config", required=True, help="Path to the YAML configuration file")
+    parser.add_argument("-mc", "--model_config", required=True, help="Path to the YAML configuration file for the ML model and parameters")
+    # parser.add_argument("-tfc", "--target_function_config", required=True, help="Path to the YAML configuration file for the benchmark function parameters")
+    # parser.add_argument("-acqmodes", "--acquisition_mode_settings", required=True, help="Acquisition mode settings for the experiment")
     parser.add_argument("-r", "--repetitions", type=int, default=1, help="Number of repetitions for the experiment")
     parser.add_argument("--rerun", action='store_true', help="Rerun the experiment even if the benchmark folder exists")
     args = parser.parse_args()
 
-    with open(args.config, "r") as file:
+    # Load the benchmark configuration
+    with open(args.benchmark_config, "r") as file:
         config = yaml.safe_load(file)
+    # Load the model configuration
+    with open(args.model_config, "r") as file:
+        model_config = yaml.safe_load(file)
+    # with open(args.config, "r") as file:
+    #     config = yaml.safe_load(file)
 
     # --------------------------------------------------------------------------------
     # SET RANDOM SEEDS
@@ -164,6 +173,13 @@ if __name__ == '__main__':
     print(f"Initial Sampling: {INIT_SAMPLING} with {INIT_BATCH} points")
 
     # --------------------------------------------------------------------------------
+    # MODEL SECTION
+    ml_model_type = model_config.get('ml_model', None)
+    ml_model_params = model_config.get('model_parameters', {})
+    assert ml_model_type is not None, "ML model type must be specified in the model_config file."
+    # --------------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------------
     # FUNCTION SELECTION
     function_config = config.get('function_parameters', None)
     assert function_config is not None, "Function parameters must be provided in the config file."
@@ -187,6 +203,7 @@ if __name__ == '__main__':
 
     function_dim = function_params.get('n_dimensions', None)
     function_bounds = function_params.get('bounds', None)
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # GET GT DATAFRAME
@@ -342,7 +359,7 @@ if __name__ == '__main__':
 
         # --------------------------------------------------------------------------------
         # SET UP THE MODEL
-        ML_MODEL = setup_ml_model(config)
+        ML_MODEL = setup_ml_model(ml_model_type=ml_model_type, ml_model_params=ml_model_params)
         # --------------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------------

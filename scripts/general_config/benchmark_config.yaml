@@ -68,7 +68,6 @@ acquisition_protocol:
 # Adaptive refinement configuration
 adaptive_refinement: # refinement parameters disabled if null
   method: "lhs"  # method to sample the points for the refinement (either 'lhs' or 'sobol')
-  negate: true
   refinement_noise_std: 0.0
   refinement_step: 4  # number of points acquired after which to perform refinement
   refinement_centroids: 3  # number of centroids to use for the refinement (chosen via fps)

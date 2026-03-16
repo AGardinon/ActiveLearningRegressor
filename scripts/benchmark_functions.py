@@ -87,17 +87,15 @@ def process_dataset(df, search_var: List[str], target_var: str, split_column: st
     return train_df, val_df
 
 
-def data_scaler_setup(config: dict) -> BaseEstimator:
+def data_scaler_setup(data_scaler_type: str, data_scaler_params: dict) -> BaseEstimator:
     """Sets up the data scaler based on the configuration.
     Args:
-        config (dict): Configuration dictionary.
+        data_scaler_type (str): Type of the data scaler.
+        data_scaler_params (dict): Parameters for the data scaler.
     Returns:
         BaseEstimator: The data scaler instance.
     """
     from sklearn.preprocessing import StandardScaler, MinMaxScaler
-
-    data_scaler_type = config.get('data_scaler', 'StandardScaler')
-    data_scaler_params = config.get('data_scaler_params', {})
 
     if data_scaler_type == 'StandardScaler':
         scaler = StandardScaler(**data_scaler_params)
@@ -108,6 +106,25 @@ def data_scaler_setup(config: dict) -> BaseEstimator:
     
     return scaler
 
+
+def aggregate_configurations(benchmark_config: dict, model_config: dict, acquisition_config: dict, target_function_config: dict) -> dict:
+    """Aggregates all configurations into a single dictionary for easier access/output.
+    Args:
+        benchmark_config (dict): Benchmark configuration dictionary.
+        model_config (dict): Model configuration dictionary.
+        acquisition_config (dict): Acquisition mode settings dictionary.
+        target_function_config (dict): Target function configuration dictionary.
+    Returns:
+        dict: Aggregated configuration dictionary.
+    """
+    config = {
+        "benchmark": benchmark_config,
+        "model": model_config,
+        "acquisition": acquisition_config,
+        "target_function": target_function_config
+    }
+    return config
+
 # --------------------------------------------------------------------------------
 # MAIN EXPERIMENT SCRIPT
 if __name__ == '__main__':
@@ -116,24 +133,35 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Read a YAML config file.")
     parser.add_argument("-bc", "--benchmark_config", required=True, help="Path to the YAML configuration file")
     parser.add_argument("-mc", "--model_config", required=True, help="Path to the YAML configuration file for the ML model and parameters")
-    # parser.add_argument("-tfc", "--target_function_config", required=True, help="Path to the YAML configuration file for the benchmark function parameters")
-    # parser.add_argument("-acqmodes", "--acquisition_mode_settings", required=True, help="Acquisition mode settings for the experiment")
+    parser.add_argument("-acqmodes", "--acquisition_mode_settings", required=True, help="Acquisition mode settings for the experiment")
+    parser.add_argument("-tfc", "--target_function_config", required=True, help="Path to the YAML configuration file for the benchmark function parameters")
     parser.add_argument("-r", "--repetitions", type=int, default=1, help="Number of repetitions for the experiment")
     parser.add_argument("--rerun", action='store_true', help="Rerun the experiment even if the benchmark folder exists")
     args = parser.parse_args()
 
+    # --------------------------------------------------------------------------------
+    # LOAD CONFIGURATIONS FILES
+
     # Load the benchmark configuration
     with open(args.benchmark_config, "r") as file:
-        config = yaml.safe_load(file)
+        benchmark_config = yaml.safe_load(file)
+
     # Load the model configuration
     with open(args.model_config, "r") as file:
         model_config = yaml.safe_load(file)
-    # with open(args.config, "r") as file:
-    #     config = yaml.safe_load(file)
+
+    # Load the acquisition mode settings
+    with open(args.acquisition_mode_settings, "r") as file:
+        acquisition_config = yaml.safe_load(file)
+
+    # Load the target function configuration if provided, otherwise it will be skipped
+    with open(args.target_function_config, "r") as file:
+        target_function_config = yaml.safe_load(file)
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # SET RANDOM SEEDS
-    seed = config.get('SEED', None)
+    seed = benchmark_config.get('SEED', None)
     if seed is not None:
         np.random.seed(seed)
         random.seed(seed)
@@ -149,28 +177,26 @@ if __name__ == '__main__':
      N_CYCLES,           # Number of active learning cycles
      INIT_BATCH,         # Initial batch size
      INIT_SAMPLING,      # Initial sampling method
-     ACQUI_PARAMS,       # Acquisition function parameters
      SEARCH_VAR,         # Search space variables
-     TARGET_VAR) = setup_experiment_variables(config)
+     TARGET_VAR) = setup_experiment_variables(benchmark_config)
 
     # Create benchmark paths and set up dataframes (pool_df -> complete search space)
     BENCHMARK_PATH = create_benchmark_path(exp_name=EXP_NAME, overwrite=True if args.rerun else False)
 
     # Save a copy of the config file in the benchmark folder
-    config_save_path = BENCHMARK_PATH / 'config.yaml'
+    config_save_path = BENCHMARK_PATH / 'experiment_config.yaml'
+    config_all = aggregate_configurations(benchmark_config, model_config, acquisition_config, target_function_config)
     with open(config_save_path, 'w') as file:
-        yaml.dump(config, file)
+        yaml.dump(config_all, file)
 
     # Scaler path
     scaler_path = BENCHMARK_PATH / 'pool_scaler.joblib'
-
-    # Acquisition protocol
-    ACQUI_PROTOCOL = config.get('acquisition_protocol', None)
 
     print(f"Experiment Name: {EXP_NAME}\n->\t{BENCHMARK_PATH}")
     print(f"Search Variables: {SEARCH_VAR}")
     print(f"Target Variable: {TARGET_VAR}")
     print(f"Initial Sampling: {INIT_SAMPLING} with {INIT_BATCH} points")
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # MODEL SECTION
@@ -180,8 +206,22 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
+    # ACQUISITION MODES SETTINGS
+    acquisition_parameters = acquisition_config.get('acquisition_parameters', None)
+    acquisition_protocol = benchmark_config.get('acquisition_protocol', None)
+    assert acquisition_parameters is not None, "Acquisition parameters must be specified in the acquisition_mode_settings file."
+    assert acquisition_protocol is not None, "Acquisition protocol must be specified in the benchmark_config file."
+
+    # Init the acquisition parameters generator
+    acqui_param_gen = AcquisitionParametersGenerator(
+        acquisition_params=acquisition_parameters,
+        acquisition_protocol=acquisition_protocol
+    )
+    # --------------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------------
     # FUNCTION SELECTION
-    function_config = config.get('function_parameters', None)
+    function_config = target_function_config.get('function_parameters', None)
     assert function_config is not None, "Function parameters must be provided in the config file."
 
     function_name = function_config.pop('function', None)
@@ -208,25 +248,25 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------
     # GET GT DATAFRAME
     # read pre-defined ground truth and evidence dataframes
-    gt_file = config.get('ground_truth_file', None)
-    evidence_file = config.get('experiment_evidence', None)
+    gt_file = benchmark_config.get('ground_truth_file', None)
+    evidence_file = benchmark_config.get('experiment_evidence', None)
 
     gt_df, evidence_df = None, None
 
     if gt_file is not None:
         gt_df, evidence_df = get_gt_dataframes(gt_file, evidence_file)
-        print(f"Ground truth dataset loaded from\n{gt_file}\nwith {len(gt_df)} points.")
+        print(f"Ground truth dataset loaded from -> {gt_file} with {len(gt_df)} points.")
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # GENERATE TRAINING DATASET
     # Generate synthetic dataset
-    train_set_config = config.get('train_set_parameters', None)
-
+    train_set_config = target_function_config.get('train_set_parameters', None)
+    
     if train_set_config is None:
         raise ValueError("Train set parameters must be provided in the config file to generate the training dataset regardless of the GT file.")
 
     elif train_set_config is not None:
-
         train_function_negate = train_set_config.pop('negate', False)
         dataset_generator = DatasetGenerator(
             n_dimensions=function_dim,
@@ -260,6 +300,7 @@ if __name__ == '__main__':
             # Save the generated VAL dataset for reference
             val_save_path = BENCHMARK_PATH / 'gt_validation_dataset.csv'
             val_df.to_csv(val_save_path, index=False)
+    # --------------------------------------------------------------------------------
 
     # Save the generated POOL dataset for reference
     pool_save_path = BENCHMARK_PATH / 'pool_dataset.csv'
@@ -276,7 +317,9 @@ if __name__ == '__main__':
     val_target_landscape = val_df[TARGET_VAR].to_numpy().ravel()
 
     # Set up and apply the data scaler on the complete search space
-    data_scaler = data_scaler_setup(config)
+    data_scaler_type = benchmark_config.get('data_scaler', None)
+    data_scaler_params = benchmark_config.get('scaler_params') or {}
+    data_scaler = data_scaler_setup(data_scaler_type, data_scaler_params)
     X_pool, data_scaler = setup_data_pool(df=pool_df, search_var=SEARCH_VAR, scaler=data_scaler)
     joblib.dump(data_scaler, scaler_path)
 
@@ -290,7 +333,7 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------
     # LANDSCAPE ADDITIONAL PARAMETERS AND SETUP
     # Set up landscape penalization parameters
-    landscape_penalization = config.get('landscape_penalization', None)
+    landscape_penalization = benchmark_config.get('landscape_penalization', None)
     if landscape_penalization is not None:
         pen_radius = landscape_penalization.get('radius', None)
         pen_strength = landscape_penalization.get('strength', None)
@@ -299,10 +342,10 @@ if __name__ == '__main__':
 
     # --------------------------------------------------------------------------------
     # BATCH SELECTION STRATEGY SETUP
-    batch_selection_config = config.get('batch_selection', None)
+    batch_selection_config = benchmark_config.get('batch_selection', None)
     if batch_selection_config is not None:
         batch_selection_method = batch_selection_config.get('method', 'highest_landscape')
-        batch_selection_params = batch_selection_config.get('method_params') or {}
+        batch_selection_params = batch_selection_config.get('method_params', {})
         print(f"Batch selection strategy: {batch_selection_method} with params: {batch_selection_params}")
     else:
         raise ValueError("Batch selection configuration must be provided in the config file, with at least the method defined.")
@@ -312,7 +355,7 @@ if __name__ == '__main__':
     # ADAPTIVE REFINEMENT SETUP
     # Set up the space refinement sampler, it will only refine the X_pool
     refine_generator = None
-    refinement_config = config.get('adaptive_refinement', None)
+    refinement_config = benchmark_config.get('adaptive_refinement', None)
 
     if refinement_config is not None:
         refine_method = refinement_config.get('method', 'lhs')
@@ -346,12 +389,6 @@ if __name__ == '__main__':
     benchmark_data = []
     # Contains data of all the training points acquired during the experiment with additional metadata
     train_points_data = []
-
-    # Init the acquisition parameters generator
-    acqui_param_gen = AcquisitionParametersGenerator(
-        acquisition_params=ACQUI_PARAMS,
-        acquisition_protocol=ACQUI_PROTOCOL
-    )
 
     # --------------------------------------------------------------------------------
     # EXPERIMENT REPETITIONS

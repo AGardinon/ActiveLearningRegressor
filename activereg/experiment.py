@@ -102,7 +102,6 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
     n_cycles = config.get('n_cycles', 3)
     init_batch = config.get('init_batch_size', 8)
     init_sampling = config.get('init_sampling', 'fps')
-    acquisition_params = config.get('acquisition_parameters', [])
 
     search_space_vars = config.get('search_space_variables', [])
     assert len(search_space_vars) > 0, "Search space variables must be defined in the config file."
@@ -115,7 +114,6 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
             n_cycles, 
             init_batch, 
             init_sampling,
-            acquisition_params,
             search_space_vars,
             target_vars)
 

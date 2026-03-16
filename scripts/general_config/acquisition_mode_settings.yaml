@@ -1,0 +1,20 @@
+# ------------------------------------------------------------------------------
+# General settings for acquisition modes and protocols used in the benchmark experiments.
+# ------------------------------------------------------------------------------
+
+# Acquisition functions configuration
+acquisition_parameters:
+  - acquisition_mode: "expected_improvement"
+
+  - acquisition_mode: "target_expected_improvement_1"
+    y_target: 60
+    epsilon: 10
+
+  - acquisition_mode: "maximum_predicted_value"
+
+  - acquisition_mode: "exploration_mutual_info"
+
+  - acquisition_mode: "percentage_target_expected_improvement"
+    percentage: 70
+
+  - acquisition_mode: "random"

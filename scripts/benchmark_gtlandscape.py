@@ -122,23 +122,36 @@ def data_scaler_setup(data_scaler_type: str, data_scaler_params: dict) -> BaseEs
     return scaler
 
 
-def aggregate_configurations(benchmark_config: dict, model_config: dict, acquisition_config: dict, target_function_config: dict) -> dict:
-    """Aggregates all configurations into a single dictionary for easier access/output.
+def save_configs_files(
+    path: Path, 
+    benchmark_config: dict = {}, 
+    model_config: dict = {}, 
+    acquisition_config: dict = {}, 
+    target_function_config: dict = {}
+) -> None:
+    """Saves the aggregated configuration dictionary to a YAML file in the benchmark folder.
     Args:
-        benchmark_config (dict): Benchmark configuration dictionary.
-        model_config (dict): Model configuration dictionary.
-        acquisition_config (dict): Acquisition mode settings dictionary.
-        target_function_config (dict): Target function configuration dictionary.
-    Returns:
-        dict: Aggregated configuration dictionary.
+        path (Path): The path to the benchmark folder where the config file will be saved.
+        benchmark_config (dict, optional): Benchmark configuration dictionary. Defaults to {}.
+        model_config (dict, optional): Model configuration dictionary. Defaults to {}.
+        acquisition_config (dict, optional): Acquisition mode settings dictionary. Defaults to {}.
+        target_function_config (dict, optional): Target function configuration dictionary. Defaults to {}.
     """
-    config = {
-        "benchmark": benchmark_config,
-        "model": model_config,
-        "acquisition": acquisition_config,
-        "target_function": target_function_config
-    }
-    return config
+    config_folder = path / 'config'
+    config_folder.mkdir(exist_ok=True)
+    # Benchmark configuration
+    with open(config_folder / 'benchmark_config.yaml', 'w') as file:
+        yaml.dump(benchmark_config, file)
+    # Model configuration
+    with open(config_folder / 'model_config.yaml', 'w') as file:
+        yaml.dump(model_config, file)
+    # Acquisition mode settings
+    with open(config_folder / 'acquisition_mode_settings.yaml', 'w') as file:
+        yaml.dump(acquisition_config, file)
+    # Target function configuration
+    with open(config_folder / 'target_function_config.yaml', 'w') as file:
+        yaml.dump(target_function_config, file)
+
 
 # --------------------------------------------------------------------------------
 # MAIN EXPERIMENT SCRIPT
@@ -193,11 +206,13 @@ if __name__ == '__main__':
     # Create benchmark paths and set up dataframes (pool_df -> complete search space)
     BENCHMARK_PATH = create_benchmark_path(exp_name=EXP_NAME, overwrite=True if args.rerun else False)
 
-    # Save a copy of the config file in the benchmark folder
-    config_save_path = BENCHMARK_PATH / 'experiment_config.yaml'
-    config_all = aggregate_configurations(benchmark_config, model_config, acquisition_config, target_function_config=None)
-    with open(config_save_path, 'w') as file:
-        yaml.dump(config_all, file)
+    # Save a copy of the config file in the benchmark folder for reference and reproducibility purposes
+    save_configs_files(
+        path=BENCHMARK_PATH, 
+        benchmark_config=benchmark_config, 
+        model_config=model_config, 
+        acquisition_config=acquisition_config,
+    )
 
     # Scaler path
     scaler_path = BENCHMARK_PATH / 'pool_scaler.joblib'

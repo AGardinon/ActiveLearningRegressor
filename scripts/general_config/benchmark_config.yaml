@@ -3,12 +3,12 @@
 # ------------------------------------------------------------------------------
 SEED: null
 
-experiment_name: "6D/ackley_gpr_10cy_2pts_1stage_1_1_adaptive_refinement_test_after_refactoring"
-experiment_notes: "Benchmarking the Ackley 6D function"
+experiment_name: "6D/hartmann_gpr_40cy_5pts_1stage_3_2"
+experiment_notes: "Benchmarking the Hartmann 6D function"
 
 # --------------------------------------------------------------
 # Ground truth data configuration
-ground_truth_file: "ackley6d_lhs_1M.csv"
+ground_truth_file: "hartmann6d_lhs_1M.csv"
 experiment_evidence: null
 
 # --------------------------------------------------------------
@@ -31,8 +31,8 @@ scaler_params: null
 
 # --------------------------------------------------------------
 # Cycles parameters
-n_cycles: 10
-init_batch_size: 2
+n_cycles: 40
+init_batch_size: 5
 init_sampling: "random"
 
 landscape_penalization: null  # radius: 0.25, strength: 1.0
@@ -48,9 +48,9 @@ batch_selection:
 # Multi-stage acquisition protocol configuration
 acquisition_protocol:
   stage_1:
-    cycles: 100
+    cycles: 40
     acquisition_modes: ['exploration_mutual_info', 'expected_improvement']
-    n_points: [1, 1]  # Number of points to acquire for each mode in stage 1
+    n_points: [2, 3]  # Number of points to acquire for each mode in stage 1
   # stage_2:
   #   cycles: 40
   #   acquisition_modes: ['expected_improvement']
@@ -69,9 +69,9 @@ acquisition_protocol:
 adaptive_refinement: # refinement parameters disabled if null
   method: "lhs"  # method to sample the points for the refinement (either 'lhs' or 'sobol')
   refinement_noise_std: 0.0
-  refinement_step: 4  # number of points acquired after which to perform refinement
+  refinement_step: 10  # number of points acquired after which to perform refinement
   refinement_centroids: 3  # number of centroids to use for the refinement (chosen via fps)
-  refinement_batch_size: 500  # number of points to sample around each centroid during refinement
+  refinement_batch_size: 250  # number of points to sample around each centroid during refinement
   half_side_length_strategy: 'density'  # strategy to determine the half-side length of the hypercube around each centroid (either 'fixed' or 'density')
   half_side_length_strategy_params:  # parameters for the half-side length strategy (if using 'fixed', provide 'base_fraction'; if using 'density', provide 'density_scale' and 'max_half_side')
     base_fraction: 0.3

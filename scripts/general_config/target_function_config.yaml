@@ -11,7 +11,7 @@ function_parameters:
 
 # Train set configuration (initial points)
 train_set_parameters:
-  n_samples: 5000
+  n_samples: 50000
   method: "lhs"
   val_size: null
   negate: true

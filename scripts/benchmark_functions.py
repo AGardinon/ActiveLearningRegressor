@@ -1,27 +1,29 @@
 # ------------------------------------------------------------------------------
-#
 # Benchmark Experiment Script for Active Learning Regressor
-#
 # ------------------------------------------------------------------------------
 
+'''Script description:
+This script is designed to run benchmark experiments for active learning regression 
+using the ActiveRegressor framework. It operates with a mixed-batch pool-based AL
+protocol designed to evaluate a benchmark function (either synthetic or custom) where
+the ground truth (GT) is known and used as a holdout validation set.
+An initial training dataset is generated based on the parameters provided in the 
+config file and it can be expanded with a simple geometric-based adaptive refinement strategy.
+
+The script requires a few configuration files in YAML format:
+- benchmark_config.yaml: contains the general settings for the benchmark experiment, 
+    such as the experiment name, number of cycles, initial sampling method, acquisition protocol, and other relevant parameters.
+
+- model_config.yaml: contains the settings for the machine learning model used in the experiment, 
+    including the model type and its hyperparameters.
+
+- acquisition_mode_settings.yaml: contains the settings for the acquisition modes used in the experiment, 
+    such as the number of points to acquire for each mode and the specific parameters for each acquisition mode.
+
+- target_function_config.yaml: contains the settings for the benchmark function, 
+    including the function type, its parameters, and the settings for the training dataset generation.
 '''
-TODO:
-- Adding new metrics:
-    x Negative Log-Likelihood (predictive NLL) on the validation set
-    x Calibration metrics: PICP@a and MPIW@a (e.g. a=95%)
-    - If multi-objective: Hypervolume (HV) and Hypervolume Improvement (HVI)
-    - Optimization / goal-directed metrics: improvement per query, cumulative regret, time-to-target
 
-x Refactor the metric computation into a dedicated function for clarity and reusability.
-
-- Refine the space sampling as the function in high dimensional spaces can be tricky to handle
-  due to low density of points in the area to optimize.
-    - Adaptive LHS sampling to improve POOL coverage
-
-- Remove saving of the landscapes at each cycle to reduce memory usage and disk space.
-'''
-
-from jaxtyping import config
 import yaml
 import joblib
 import argparse

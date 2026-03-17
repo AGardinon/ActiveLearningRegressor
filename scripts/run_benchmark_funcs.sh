@@ -100,11 +100,11 @@ fi
 # Run experiment
 #######################################
 
-python "$PY_SCRIPT" \
-    --benchmark_config "$BENCHMARK_CONFIG" \
-    --ml_model_config "$ML_MODEL_CONFIG" \
-    --acq_mode_config "$ACQ_MODE_CONFIG" \
-    --tgt_func_config "$TGT_FUNC_CONFIG" \
-    --n_reps "$N_REPS" \
+python $PY_SCRIPT \
+    --benchmark_config $BENCHMARK_CONFIG \
+    --model_config $ML_MODEL_CONFIG \
+    --acquisition_mode_settings $ACQ_MODE_CONFIG \
+    --target_function_config $TGT_FUNC_CONFIG \
+    --repetitions $N_REPS \
     $PY_FLAGS \
     > "$LOG_FILE"

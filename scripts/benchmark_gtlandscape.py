@@ -1,24 +1,28 @@
 # ------------------------------------------------------------------------------
-#
 # Benchmark Experiment Script for Active Learning Regressor
-#
 # ------------------------------------------------------------------------------
 
-'''
-TODO:
-- Adding new metrics:
-    x Negative Log-Likelihood (predictive NLL) on the validation set
-    x Calibration metrics: PICP@a and MPIW@a (e.g. a=95%)
-    - If multi-objective: Hypervolume (HV) and Hypervolume Improvement (HVI)
-    - Optimization / goal-directed metrics: improvement per query, cumulative regret, time-to-target
+'''Script description:
+This script is designed to run benchmark experiments for active learning regression 
+using the ActiveRegressor framework. It operates with a mixed-batch pool-based AL
+protocol designed to evaluate an unknown function for which the ground truth (GT) is known.
+The GT serves as the pool dataset that defines the entire experimental search space.
+Moreover, the expriment is initialized by sampling a starting set from the GT dataset.
+This setup allows for a comprehensive evaluation of the AL strategies in a controlled environment,
+where the performance can be assessed against the known GT landscape.
 
-x Refactor the metric computation into a dedicated function for clarity and reusability.
+The script requires a few configuration files in YAML format:
+- benchmark_config.yaml: contains the general settings for the benchmark experiment, 
+    such as the experiment name, number of cycles, initial sampling method, acquisition protocol, and other relevant parameters.
 
-- Refine the space sampling as the function in high dimensional spaces can be tricky to handle
-  due to low density of points in the area to optimize.
-    - Adaptive LHS sampling to improve POOL coverage
+- model_config.yaml: contains the settings for the machine learning model used in the experiment, 
+    including the model type and its hyperparameters.
 
-- Remove saving of the landscapes at each cycle to reduce memory usage and disk space.
+- acquisition_mode_settings.yaml: contains the settings for the acquisition modes used in the experiment, 
+    such as the number of points to acquire for each mode and the specific parameters for each acquisition mode.
+
+- target_function_config.yaml: contains the settings for the benchmark function, 
+    including the function type, its parameters, and the settings for the training dataset generation.
 '''
 
 import yaml
@@ -46,17 +50,6 @@ from activereg.experiment import (get_gt_dataframes,
                                   AcquisitionParametersGenerator)
 from typing import List, Tuple
 from sklearn.base import BaseEstimator
-
-# --------------------------------------------------------------------------------
-# FUNCTIONAL FORMS (USED IN THE BENCHMARKS STUDY)
-
-from botorch.test_functions import Hartmann, Ackley, StyblinskiTang
-
-FUNCTIONS_DICT = {
-    "Hartmann": Hartmann,
-    "Ackley": Ackley,
-    "StyblinskiTang" : StyblinskiTang
-}
 
 # --------------------------------------------------------------------------------
 # FUNCTIONS
@@ -97,17 +90,31 @@ def process_dataset(df, search_var: List[str], target_var: str, split_column: st
     return train_df, val_df
 
 
-def data_scaler_setup(config: dict) -> BaseEstimator:
+def extract_landscape_bounds(df: pd.DataFrame, search_var: List[str]) -> np.ndarray:
+    """Extracts the bounds of the search space from the dataset.
+    Args:
+        df (pd.DataFrame): The complete dataset.
+        search_var (List[str]): List of search variable names.
+    Returns:
+        np.ndarray: Array of shape (n_variables, 2) containing the lower and upper bounds for each variable.
+    """
+    bounds = []
+    for var in search_var:
+        var_min = df[var].min()
+        var_max = df[var].max()
+        bounds.append((var_min, var_max))
+    return np.array(bounds)
+
+
+def data_scaler_setup(data_scaler_type: str, data_scaler_params: dict) -> BaseEstimator:
     """Sets up the data scaler based on the configuration.
     Args:
-        config (dict): Configuration dictionary.
+        data_scaler_type (str): Type of the data scaler.
+        data_scaler_params (dict): Parameters for the data scaler.
     Returns:
         BaseEstimator: The data scaler instance.
     """
     from sklearn.preprocessing import StandardScaler, MinMaxScaler
-
-    data_scaler_type = config.get('data_scaler', 'StandardScaler')
-    data_scaler_params = config.get('data_scaler_params', {})
 
     if data_scaler_type == 'StandardScaler':
         scaler = StandardScaler(**data_scaler_params)
@@ -118,23 +125,70 @@ def data_scaler_setup(config: dict) -> BaseEstimator:
     
     return scaler
 
+
+def save_configs_files(
+    path: Path, 
+    benchmark_config: dict = {}, 
+    model_config: dict = {}, 
+    acquisition_config: dict = {}, 
+    target_function_config: dict = {}
+) -> None:
+    """Saves the aggregated configuration dictionary to a YAML file in the benchmark folder.
+    Args:
+        path (Path): The path to the benchmark folder where the config file will be saved.
+        benchmark_config (dict, optional): Benchmark configuration dictionary. Defaults to {}.
+        model_config (dict, optional): Model configuration dictionary. Defaults to {}.
+        acquisition_config (dict, optional): Acquisition mode settings dictionary. Defaults to {}.
+        target_function_config (dict, optional): Target function configuration dictionary. Defaults to {}.
+    """
+    config_folder = path / 'config'
+    config_folder.mkdir(exist_ok=True)
+    # Benchmark configuration
+    with open(config_folder / 'benchmark_config.yaml', 'w') as file:
+        yaml.dump(benchmark_config, file)
+    # Model configuration
+    with open(config_folder / 'model_config.yaml', 'w') as file:
+        yaml.dump(model_config, file)
+    # Acquisition mode settings
+    with open(config_folder / 'acquisition_mode_settings.yaml', 'w') as file:
+        yaml.dump(acquisition_config, file)
+    # Target function configuration
+    with open(config_folder / 'target_function_config.yaml', 'w') as file:
+        yaml.dump(target_function_config, file)
+
+
 # --------------------------------------------------------------------------------
 # MAIN EXPERIMENT SCRIPT
 if __name__ == '__main__':
     # --------------------------------------------------------------------------------
     # Parse the config.yaml
     parser = argparse.ArgumentParser(description="Read a YAML config file.")
-    parser.add_argument("-c", "--config", required=True, help="Path to the YAML configuration file")
+    parser.add_argument("-bc", "--benchmark_config", required=True, help="Path to the YAML configuration file")
+    parser.add_argument("-mc", "--model_config", required=True, help="Path to the YAML configuration file for the ML model and parameters")
+    parser.add_argument("-acqmodes", "--acquisition_mode_settings", required=True, help="Acquisition mode settings for the experiment")
     parser.add_argument("-r", "--repetitions", type=int, default=1, help="Number of repetitions for the experiment")
     parser.add_argument("--rerun", action='store_true', help="Rerun the experiment even if the benchmark folder exists")
     args = parser.parse_args()
 
-    with open(args.config, "r") as file:
-        config = yaml.safe_load(file)
+    # --------------------------------------------------------------------------------
+    # LOAD CONFIGURATIONS FILES
+
+    # Load the benchmark configuration
+    with open(args.benchmark_config, "r") as file:
+        benchmark_config = yaml.safe_load(file)
+
+    # Load the model configuration
+    with open(args.model_config, "r") as file:
+        model_config = yaml.safe_load(file)
+
+    # Load the acquisition mode settings
+    with open(args.acquisition_mode_settings, "r") as file:
+        acquisition_config = yaml.safe_load(file)
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # SET RANDOM SEEDS
-    seed = config.get('SEED', None)
+    seed = benchmark_config.get('SEED', None)
     if seed is not None:
         np.random.seed(seed)
         random.seed(seed)
@@ -150,90 +204,97 @@ if __name__ == '__main__':
      N_CYCLES,           # Number of active learning cycles
      INIT_BATCH,         # Initial batch size
      INIT_SAMPLING,      # Initial sampling method
-     ACQUI_PARAMS,       # Acquisition function parameters
      SEARCH_VAR,         # Search space variables
-     TARGET_VAR) = setup_experiment_variables(config)
+     TARGET_VAR) = setup_experiment_variables(benchmark_config)
 
     # Create benchmark paths and set up dataframes (pool_df -> complete search space)
     BENCHMARK_PATH = create_benchmark_path(exp_name=EXP_NAME, overwrite=True if args.rerun else False)
 
-    # Save a copy of the config file in the benchmark folder
-    config_save_path = BENCHMARK_PATH / 'config.yaml'
-    with open(config_save_path, 'w') as file:
-        yaml.dump(config, file)
+    # Save a copy of the config file in the benchmark folder for reference and reproducibility purposes
+    save_configs_files(
+        path=BENCHMARK_PATH, 
+        benchmark_config=benchmark_config, 
+        model_config=model_config, 
+        acquisition_config=acquisition_config,
+    )
 
     # Scaler path
     scaler_path = BENCHMARK_PATH / 'pool_scaler.joblib'
-
-    # Acquisition protocol
-    ACQUI_PROTOCOL = config.get('acquisition_protocol', None)
 
     print(f"Experiment Name: {EXP_NAME}\n->\t{BENCHMARK_PATH}")
     print(f"Search Variables: {SEARCH_VAR}")
     print(f"Target Variable: {TARGET_VAR}")
     print(f"Initial Sampling: {INIT_SAMPLING} with {INIT_BATCH} points")
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
-    # GET/CREATE GT DATAFRAMES
+    # MODEL SECTION
+    ml_model_type = model_config.get('ml_model', None)
+    ml_model_params = model_config.get('model_parameters', {})
+    assert ml_model_type is not None, "ML model type must be specified in the model_config file."
+    # --------------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------------
+    # ACQUISITION MODES SETTINGS
+    acquisition_parameters = acquisition_config.get('acquisition_parameters', None)
+    acquisition_protocol = benchmark_config.get('acquisition_protocol', None)
+    assert acquisition_parameters is not None, "Acquisition parameters must be specified in the acquisition_mode_settings file."
+    assert acquisition_protocol is not None, "Acquisition protocol must be specified in the benchmark_config file."
+
+    # Init the acquisition parameters generator
+    acqui_param_gen = AcquisitionParametersGenerator(
+        acquisition_params=acquisition_parameters,
+        acquisition_protocol=acquisition_protocol
+    )
+    # --------------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------------
+    # GET GT DATAFRAME
     # read pre-defined ground truth and evidence dataframes
-    gt_file = config.get('ground_truth_file', None)
-    evidence_file = config.get('experiment_evidence', None)
+    gt_file = benchmark_config.get('ground_truth_file', None)
+    evidence_file = benchmark_config.get('experiment_evidence', None)
+
+    gt_df, evidence_df = None, None
 
     if gt_file is not None:
         gt_df, evidence_df = get_gt_dataframes(gt_file, evidence_file)
+        print(f"Ground truth dataset loaded from -> {gt_file} with {len(gt_df)} points.")
+    # --------------------------------------------------------------------------------
 
-    # Generate synthetic dataset based on functional forms
-    elif gt_file is None:
-        gt_config = config.get('ground_truth_parameters', None)
-        assert gt_config is not None, "Ground truth parameters must be provided in the config file."
+    # --------------------------------------------------------------------------------
+    # PREPARE THE DATASETS
+    pool_df, val_df = process_dataset(
+        df=gt_df,
+        search_var=SEARCH_VAR,
+        target_var=TARGET_VAR,
+        split_column='set'  # the GT file can optionally contain a 'set' column to split the dataset into train and validation, if not present the entire GT will be used as training
+    )
 
-        function_name = gt_config.pop('function', None)
-        function_dim = gt_config.pop('n_dimensions', 3)
-        function_bounds = np.array(gt_config.pop('bounds', [[0, 1]] * function_dim))
-        function_negate = gt_config.pop('negate', False)
+    gt_pool_bounds = extract_landscape_bounds(df=pool_df, search_var=SEARCH_VAR)
 
-        if function_name not in FUNCTIONS_DICT:
-            raise ValueError(f"Function '{function_name}' is not defined. Choose from {list(FUNCTIONS_DICT.keys())}.")
-        function_class = FUNCTIONS_DICT[function_name]
-
-        dataset_generator = DatasetGenerator(
-            n_dimensions=function_dim,
-            bounds=function_bounds,
-            negate=function_negate,
-            seed=seed
-        )
-        
-        sampling_method = gt_config.pop('method', 'lhs')
-        gt_df = dataset_generator.generate_dataset(
-            function=function_class,
-            method=sampling_method,
-            **gt_config
-        )
-        evidence_df = None
-        print(f"Synthetic ground truth dataset generated using the {function_name} function in {function_dim}D.")
-
-        # Save the generated ground truth dataset for reference
-        gt_save_path = BENCHMARK_PATH / 'ground_truth_dataset.csv'
-        gt_df.to_csv(gt_save_path, index=False)
+    # Save the generated POOL dataset for reference
+    pool_save_path = BENCHMARK_PATH / 'pool_dataset.csv'
+    pool_df.to_csv(pool_save_path, index=False)
     # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # PREPARE DATAFRAMES AND SCALER
-    # Process the gt dataframe dividing the test from the training set (-> pool dataset)
-    pool_df, val_df = process_dataset(gt_df, search_var=SEARCH_VAR, target_var=TARGET_VAR, split_column='set')
+    # train dataset -> pool_df : from which the candidates will be sampled and refined during the experiment
+    # gt dataset -> val_df : used as holdout validation set for metrics computation during the experiment
 
-    # Extract the target (GT) landscapes for metrics computation
+    # Extract the target landscapes for metrics computation
     pool_target_landscape = pool_df[TARGET_VAR].to_numpy().ravel()
     val_target_landscape = val_df[TARGET_VAR].to_numpy().ravel() if not val_df.empty else None
 
     # Set up and apply the data scaler on the complete search space
-    data_scaler = data_scaler_setup(config)
+    data_scaler_type = benchmark_config.get('data_scaler', None)
+    data_scaler_params = benchmark_config.get('scaler_params') or {}
+    data_scaler = data_scaler_setup(data_scaler_type, data_scaler_params)
     X_pool, data_scaler = setup_data_pool(df=pool_df, search_var=SEARCH_VAR, scaler=data_scaler)
-    # X_pool_reference_distance = compute_reference_distance(X=X_pool, method="median_nn")
     joblib.dump(data_scaler, scaler_path)
 
     # Create candidates dataframe (candidates_df -> unscreened space)
-    candidates_df = remove_evidence_from_gt(pool_df, evidence_df, search_vars=SEARCH_VAR)
+    candidates_df = remove_evidence_from_gt(gt=pool_df, evidence=evidence_df, search_vars=SEARCH_VAR)
 
     # Scale the validation set if available to compute metrics
     X_val = data_scaler.transform(val_df[SEARCH_VAR].to_numpy()) if not val_df.empty else None
@@ -242,54 +303,40 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------
     # LANDSCAPE ADDITIONAL PARAMETERS AND SETUP
     # Set up landscape penalization parameters
-    landscape_penalization = config.get('landscape_penalization', None)
+    landscape_penalization = benchmark_config.get('landscape_penalization', None)
     if landscape_penalization is not None:
         pen_radius = landscape_penalization.get('radius', None)
         pen_strength = landscape_penalization.get('strength', None)
         print(f"Landscape penalization activated with radius {pen_radius} and strength {pen_strength}.")
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # BATCH SELECTION STRATEGY SETUP
-    batch_selection_config = config.get('batch_selection', None)
+    batch_selection_config = benchmark_config.get('batch_selection', None)
     if batch_selection_config is not None:
         batch_selection_method = batch_selection_config.get('method', 'highest_landscape')
-        batch_selection_params = batch_selection_config.get('method_params') or {}
+        batch_selection_params = batch_selection_config.get('method_params', {})
         print(f"Batch selection strategy: {batch_selection_method} with params: {batch_selection_params}")
     else:
         raise ValueError("Batch selection configuration must be provided in the config file, with at least the method defined.")
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # ADAPTIVE REFINEMENT SETUP
-    # Set up the space refinement sampler
-    refinement_config = config.get('adaptive_refinement', None)
+    # Set up the space refinement sampler, it will only refine the X_pool
+    refine_generator = None
+    refinement_config = benchmark_config.get('adaptive_refinement', None)
+
     if refinement_config is not None:
-        refine_function_name = refinement_config.get('function', None)
-        refine_function_dim = refinement_config.get('n_dimensions', None)
-        refine_function_bounds = np.array(refinement_config.get('bounds', [[0, 1]] * refine_function_dim))
         refine_method = refinement_config.get('method', 'lhs')
         refine_noise_std = refinement_config.get('refinement_noise_std', 0.0)
-        refine_function_negate = refinement_config.get('negate', False)
-
-        if gt_file is None:
-            assert refine_function_name == function_name, "Refinement function must be the same as the defined ground truth function."
-            assert refine_function_dim == function_dim, "Refinement function dimension must be the same as the defined ground truth function."
-            
-            assert refine_function_negate == function_negate, "Refinement function negate parameter must be the same as the defined ground truth function."
-
-        elif gt_file is not None:
-            print(f"Adaptive refinement is set with negate={refine_function_negate}. "
-                  f"Check that these parameters are consistent with the ground truth function settings.")
-            if refine_function_name not in FUNCTIONS_DICT:
-                raise ValueError(f"Refinement function '{refine_function_name}' is not defined. Choose from {list(FUNCTIONS_DICT.keys())}.")
 
         refine_generator = DatasetGenerator(
-            n_dimensions=refine_function_dim,
-            bounds=refine_function_bounds,
-            negate=refine_function_negate,
+            n_dimensions=gt_pool_bounds.shape[0],
+            bounds=gt_pool_bounds,
             seed=seed
         )
 
-        refine_function = FUNCTIONS_DICT[refine_function_name]
         refine_step = refinement_config.get('refinement_step', 20)
         refine_centroids = refinement_config.get('refinement_centroids', 5)
         refine_batch_size = refinement_config.get('refinement_batch_size', 500)
@@ -302,9 +349,7 @@ if __name__ == '__main__':
         
         # DataFrame to collect all refinement points added during the experiment (for output purposes)
         collective_refinement_df = pd.DataFrame()
-
-    else:
-        refine_generator = None
+    # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
     # RUN THE BENCHMARK EXPERIMENT
@@ -314,19 +359,13 @@ if __name__ == '__main__':
     # Contains data of all the training points acquired during the experiment with additional metadata
     train_points_data = []
 
-    # Init the acquisition parameters generator
-    acqui_param_gen = AcquisitionParametersGenerator(
-        acquisition_params=ACQUI_PARAMS,
-        acquisition_protocol=ACQUI_PROTOCOL
-    )
-
     # --------------------------------------------------------------------------------
     # EXPERIMENT REPETITIONS
     for rep in range(N_REPS):
 
         # --------------------------------------------------------------------------------
         # SET UP THE MODEL
-        ML_MODEL = setup_ml_model(config)
+        ML_MODEL = setup_ml_model(ml_model_type=ml_model_type, ml_model_params=ml_model_params)
         # --------------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------------
@@ -382,6 +421,7 @@ if __name__ == '__main__':
             # Compute the best screened value and train the model
             y_best = np.max(y_train)
             ML_MODEL.train(X_train, y_train)
+
             _, y_pred_pool, y_unc_pool = ML_MODEL.predict(X_pool)
             _, y_pred_val, y_unc_val = ML_MODEL.predict(X_val) if X_val is not None else (None, None, None)
 
@@ -454,8 +494,8 @@ if __name__ == '__main__':
                     for centroid in X_centroids_refinement:
                         refinement_df = pointwise_hypercube_refinement(
                             refine_generator=refine_generator,
-                            design_bounds=refine_function_bounds,
-                            design_dimensions=refine_function_dim,
+                            design_bounds=gt_pool_bounds,
+                            design_dimensions=gt_pool_bounds.shape[0],
                             refine_centroid=np.reshape(centroid, (1, -1)),  # reshape to (1, D)
                             pool_scaled=X_pool,
                             half_side_length_strategy=half_side_length_strategy,
@@ -463,7 +503,7 @@ if __name__ == '__main__':
                             n_points=refine_batch_size,
                             refine_noise_std=refine_noise_std,
                             scaler=data_scaler,
-                            refine_function=refine_function,
+                            refine_function=None,  # the refinement is performed only on the pool points
                             refine_method=refine_method
                         )
                         # CAREFUL: the refinement_df is in the original space (unscaled)
@@ -471,12 +511,11 @@ if __name__ == '__main__':
 
                     # Separate refined_pool and refined_validation sets
                     # a) Pool set
-                    X_pool_refined = refined_df[refined_df['set'] == 'train'][SEARCH_VAR].to_numpy()
+                    X_pool_refined = refined_df[SEARCH_VAR].to_numpy()
                     X_refined_scaled = data_scaler.transform(X_pool_refined)
-                    y_pool_refined = refined_df[refined_df['set'] == 'train'][TARGET_VAR].to_numpy()
+                    y_pool_refined = refined_df[TARGET_VAR].to_numpy()
 
                     # Filter out already existing points in the candidates pool
-                    # TODO: make the min distance scaling parameter configurable or adaptive
                     X_pool_refined_filtered, filtered_indexes = filter_refined_additions(
                         X_addition=X_refined_scaled,
                         X_existing=X_pool,
@@ -494,33 +533,16 @@ if __name__ == '__main__':
                     X_pool = np.vstack((X_pool, X_pool_refined_filtered))
                     pool_target_landscape = np.concatenate((pool_target_landscape, y_refined_filtered.ravel()))
 
-                    # b) Validation set
-                    if not val_df.empty:
-                        X_val_refined = refined_df[refined_df['set'] == 'val'][SEARCH_VAR].to_numpy()
-                        X_val_refined_scaled = data_scaler.transform(X_val_refined)
-                        y_val_refined = refined_df[refined_df['set'] == 'val'][TARGET_VAR].to_numpy()
-
-                        X_val_refined_filtered, val_filtered_indexes = filter_refined_additions(
-                            X_addition=X_val_refined_scaled,
-                            X_existing=X_val,
-                            min_distance=refinement_filtering_min_distance,
-                            filter_internal=True
-                        )
-                        y_val_refined_filtered = y_val_refined[val_filtered_indexes]
-
-                        # Append the refined and filtered points to the validation set
-                        X_val = np.vstack((X_val, X_val_refined_filtered))
-                        val_target_landscape = np.concatenate((val_target_landscape, y_val_refined_filtered.ravel()))
-
                     # Update the next refinement target
                     print(f"-> Adaptive refinement step {refine_counter} at {n_points_acquired} points acquired, "
                           f"added {len(y_refined_filtered)}/{refine_centroids*refine_batch_size} points.")
                     
+                    # Retain only the filtered points in the refined_df for output purposes
+                    refined_df = refined_df.iloc[filtered_indexes]
+
                     # Collect all refinement points added during the experiment
                     # Add a column to identify the refinement step
                     refined_df['refinement_step'] = [refine_counter] * len(refined_df)
-                    # TODO: Keep only the filtered points added to the pool/validation sets
-                    # refined_df = refined_df.iloc[filtered_indexes]
                     collective_refinement_df = pd.concat([collective_refinement_df, refined_df], ignore_index=True)
                     collective_refinement_save_path = BENCHMARK_PATH / f'collective_refinement_points_rep{rep+1}.csv'
                     collective_refinement_df.to_csv(collective_refinement_save_path, index=False)
@@ -531,15 +553,12 @@ if __name__ == '__main__':
             # --------------------------------------------------------------------------------
         
         print(f"\n--- End of {rep+1}/{N_REPS} ---\n")
+        # End of repetition
         # Resetting the pool and candidates sets for the next repetition if the refinement took place
         if refine_generator is not None:
             # Reset the pool set; the candidates set is derived from the candidates_df so it is not affected by the refinement
             X_pool = data_scaler.transform(pool_df[SEARCH_VAR].to_numpy())
             pool_target_landscape = pool_df[TARGET_VAR].to_numpy().ravel()
-
-            # Reset the validation set
-            X_val = data_scaler.transform(val_df[SEARCH_VAR].to_numpy()) if not val_df.empty else None
-            val_target_landscape = val_df[TARGET_VAR].to_numpy().ravel() if not val_df.empty else None
 
         # Save the model at the end of the repetition
         model_save_path = BENCHMARK_PATH / f'ml_model_rep{rep+1}.joblib'

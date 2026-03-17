@@ -1,0 +1,16 @@
+# ------------------------------------------------------------------------------
+# MLP+anchoring ensemble configuration file for in-silico experiment
+# ------------------------------------------------------------------------------
+
+ml_model: "AnchoredEnsembleMLP"
+
+model_parameters:
+  n_models: 5
+  in_feats: 6
+  out_feats: 1
+  hidden_layers: [16, 16]
+  activation: "relu"
+  lambda_anchor: 0.0001
+  lr: 0.001
+  n_epochs: 250
+  device: "cpu"  # Use "cpu" or "cuda" to force device, or null to auto-select

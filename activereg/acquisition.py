@@ -163,7 +163,7 @@ class AcquisitionFunction:
             return exploration_mutual_info(sigma=sigma, noise_var=noise_var)
 
         elif self.acquisition_mode == 'maximum_predicted_value':
-            return maximum_predicted_value(X_candidates=X_candidates, ml_model=ml_model)
+            return maximum_predicted_value(mu=mu)
         
 
 def upper_confidence_bound(mu: np.ndarray, sigma: np.ndarray, kappa: float=2.0) -> np.ndarray:

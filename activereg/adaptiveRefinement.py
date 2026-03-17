@@ -167,13 +167,22 @@ def pointwise_hypercube_refinement(
     refine_generator.set_bounds = hyper_cube_bounds
 
     # Generate the refinement dataframe containing a train and validation set
-    refined_df = refine_generator.generate_dataset(
-        function=refine_function,
-        n_samples=n_points,
-        method=refine_method,
-        val_size=1.0,
-        noise_std=refine_noise_std,
-    )
+    if refine_function is not None:
+        refined_df = refine_generator.generate_dataset(
+            function=refine_function,
+            n_samples=n_points,
+            method=refine_method,
+            val_size=None,
+            noise_std=refine_noise_std,
+        )
+    
+    if refine_function is None:
+        dimension_names = refine_generator.get_dimension_names()
+        refine_array = refine_generator.sample_space(
+            n_samples=n_points,
+            method=refine_method,
+        )
+        refined_df = pd.DataFrame(refine_array, columns=[dimension_names[i] for i in range(design_dimensions)])
 
     return refined_df
 

@@ -102,7 +102,6 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
     n_cycles = config.get('n_cycles', 3)
     init_batch = config.get('init_batch_size', 8)
     init_sampling = config.get('init_sampling', 'fps')
-    acquisition_params = config.get('acquisition_parameters', [])
 
     search_space_vars = config.get('search_space_variables', [])
     assert len(search_space_vars) > 0, "Search space variables must be defined in the config file."
@@ -115,27 +114,20 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
             n_cycles, 
             init_batch, 
             init_sampling,
-            acquisition_params,
             search_space_vars,
             target_vars)
 
 
-def setup_ml_model(config: dict) -> regmodels.MLModel:
+def setup_ml_model(ml_model_type: str, ml_model_params: dict) -> regmodels.MLModel:
     """Sets up the machine learning model based on the configuration.
-    The configuration dictionary must contain the following keys:
-        - ml_model (str): Type of machine learning model ('GPR', 'AnchoredEnsembleMLP', 'BayesianNN').
-        - model_parameters (dict): Parameters specific to the chosen model.
 
     Args:
-        config (dict): Configuration dictionary containing model parameters.
+        ml_model_type (str): Type of machine learning model to use.
+        ml_model_params (dict): Parameters for the machine learning model.
 
     Returns:
         regmodels.MLModel: The configured machine learning model.
     """
-    ml_model_type = config.get('ml_model', None)
-    ml_model_params = config.get('model_parameters', {})
-    assert ml_model_type is not None, "ML model type must be specified in the config file."
-
     if ml_model_type == 'GPR':
         return create_gpr_instance(ml_model_params)
     elif ml_model_type == 'AnchoredEnsembleMLP':

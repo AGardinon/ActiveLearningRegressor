@@ -1,19 +1,20 @@
 #!
 
-import ot
 import numpy as np
-from scipy.stats import norm, entropy, gaussian_kde
+import pandas as pd
+from scipy.stats import norm
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.metrics.pairwise import rbf_kernel
+from typing import Literal, Tuple, Dict
 
-# TODO: add more metrics to the evaluation function
-
+# --------------------------------------------------------------
 # CONSTANTS
+# --------------------------------------------------------------
 EPS = 1e-12  # small constant for numerical stability
 CONFIDENCE = 0.95  # default confidence level
 
-# METRICS
-
+# --------------------------------------------------------------
+# Per-Cycle evaluation function
+# --------------------------------------------------------------
 
 def evaluate_cycle_metrics(
     y_pred_pool: np.ndarray,
@@ -48,7 +49,7 @@ def evaluate_cycle_metrics(
 
 # --------------------------------------------------------------------------------
 # Uncertainty & regression metrics
-
+# --------------------------------------------------------------
 
 def nll_gauss(y_true: np.ndarray, y_mean: np.ndarray, y_std: np.ndarray, eps=EPS) -> float:
     """Negative log-likelihood under Gaussian assumption.
@@ -100,161 +101,117 @@ def mpiw(y_std: np.ndarray, confidence=CONFIDENCE) -> float:
     interval_widths = 2 * z * y_std
     return np.mean(interval_widths)
 
-# --------------------------------------------------------------------------------
-# JSD metrics
 
+# --------------------------------------------------------------
+# Composite convergence metrics
+# --------------------------------------------------------------
 
-def jsd_histogram(samples_p, samples_q, nbins=100, range=None, base=2.0):
+def compute_experiment_scores(
+    experiments_data: pd.DataFrame,
+    X: str,
+    Y: str,
+    method: Literal['euclidean_improvement', 'manhattan_improvement', 'pareto_dominance', 
+                    'average_descent', 'efficiency_ratio', 'weighted_improvement'] = 'euclidean_improvement',
+    weight_x: float = 1.0,
+    weight_y: float = 1.0,
+    normalize: bool = True
+) -> Dict[str, float]:
     """
-    Compute JSD between two sample sets by histogramming them with the SAME bins.
-    - range: (min, max) or None -> automatic from combined samples.
+    Compute performance scores for experiments based on their trajectory in metric space.
     """
-    samples_p = np.asarray(samples_p).ravel()
-    samples_q = np.asarray(samples_q).ravel()
-    if range is None:
-        mn = min(samples_p.min(), samples_q.min())
-        mx = max(samples_p.max(), samples_q.max())
-        # optionally pad a bit
-        pad = 1e-6 * (mx - mn + 1.0)
-        range = (mn - pad, mx + pad)
-    p_hist, edges = np.histogram(samples_p, bins=nbins, range=range, density=False)
-    q_hist, _     = np.histogram(samples_q, bins=nbins, range=range, density=False)
-    # convert counts to probabilities
-    p_prob = p_hist.astype(float) + EPS
-    q_prob = q_hist.astype(float) + EPS
-    p_prob /= p_prob.sum()
-    q_prob /= q_prob.sum()
-    return js_divergence_from_probs(p_prob, q_prob, base=base)
-
-
-def jsd_kde(samples_p, samples_q, grid_points=512, bandwidth=None, base=2.0):
-    """
-    KDE-based JSD: fit KDE to each sample set, evaluate on shared grid, compute JSD.
-    Less sensitive to bin edge issues.
-    """
-    samples_p = np.asarray(samples_p).ravel()
-    samples_q = np.asarray(samples_q).ravel()
-    mn = min(samples_p.min(), samples_q.min())
-    mx = max(samples_p.max(), samples_q.max())
-    grid = np.linspace(mn, mx, grid_points)
-    kde_p = gaussian_kde(samples_p, bw_method=bandwidth)
-    kde_q = gaussian_kde(samples_q, bw_method=bandwidth)
-    p_vals = kde_p(grid) + EPS
-    q_vals = kde_q(grid) + EPS
-    # make probabilities (sum to 1) using Riemann sum approximation
-    p_prob = p_vals / np.trapz(p_vals, grid)
-    q_prob = q_vals / np.trapz(q_vals, grid)
-    return js_divergence_from_probs(p_prob, q_prob, base=base)
-
-
-def js_divergence_from_probs(p, q, base=2.0):
-    """Jensen-Shannon divergence between two probability vectors."""
-    p = np.asarray(p, dtype=float)
-    q = np.asarray(q, dtype=float)
-    # ensure same shape
-    assert p.shape == q.shape
-    p = p / (p.sum() + EPS)
-    q = q / (q.sum() + EPS)
-    m = 0.5 * (p + q)
-    return 0.5 * (entropy(p, m, base=base) + entropy(q, m, base=base))
-
-# --------------------------------------------------------------------------------
-# MMD and EMD
-
-
-def mmd_from_coords(
-    X1: np.ndarray, 
-    Y1: np.ndarray, 
-    X2: np.ndarray, 
-    Y2: np.ndarray, 
-    sigma: float=1.0, 
-    normalize: bool=True, 
-    shift_nonneg: bool=False, 
-    clip_min_to_zero: bool=True
-) -> float:
-    """Compute the Maximum Mean Discrepancy (MMD) between two distributions.
-
-    Args:
-        X1 (np.ndarray): Input features of shape (N, d).
-        Y1 (np.ndarray): Input target values of shape (N,).
-        X2 (np.ndarray): Input features of shape (M, d).
-        Y2 (np.ndarray): Input target values of shape (M,).
-        sigma (float, optional): Bandwidth parameter for the RBF kernel. Defaults to 1.0.
-        normalize (bool, optional): Whether to normalize the distributions. Defaults to True.
-        shift_nonneg (bool, optional): Whether to shift the masses to be non-negative. Defaults to False.
-        clip_min_to_zero (bool, optional): Whether to clip the masses to be non-negative
-
-    Returns:
-        float: The computed MMD value.
-    """
-    coords1, a = prepare_measure(X1, Y1, normalize=normalize, shift_nonneg=shift_nonneg, clip_min_to_zero=clip_min_to_zero)
-    coords2, b = prepare_measure(X2, Y2, normalize=normalize, shift_nonneg=shift_nonneg, clip_min_to_zero=clip_min_to_zero)
-    K11 = rbf_kernel(coords1, coords1, gamma=1.0/(2*sigma**2))
-    K22 = rbf_kernel(coords2, coords2, gamma=1.0/(2*sigma**2))
-    K12 = rbf_kernel(coords1, coords2, gamma=1.0/(2*sigma**2))
-    return a @ K11 @ a + b @ K22 @ b - 2 * a @ K12 @ b
-
-
-def emd_from_coords(
-    X1: np.ndarray,
-    Y1: np.ndarray,
-    X2: np.ndarray,
-    Y2: np.ndarray,
-    normalize=True,
-    shift_nonneg: bool=False,
-    clip_min_to_zero: bool=True
-) -> float:
-    """Compute the Earth Mover's Distance (EMD) between two distributions.
-
-    Args:
-        X1 (np.ndarray): Input features of shape (N, d).
-        Y1 (np.ndarray): Input target values of shape (N,).
-        X2 (np.ndarray): Input features of shape (M, d).
-        Y2 (np.ndarray): Input target values of shape (M,).
-        normalize (bool, optional): Whether to normalize the distributions. Defaults to True.
-        shift_nonneg (bool, optional): Whether to shift the masses to be non-negative. Defaults to False.
-        clip_min_to_zero (bool, optional): Whether to clip the masses to be non-negative. Defaults to True.
-
-    Returns:
-        float: The computed EMD value.
-    """
-    coords1, a = prepare_measure(X1, Y1, normalize=normalize, shift_nonneg=shift_nonneg, clip_min_to_zero=clip_min_to_zero)
-    coords2, b = prepare_measure(X2, Y2, normalize=normalize, shift_nonneg=shift_nonneg, clip_min_to_zero=clip_min_to_zero)
-    # pairwise Euclidean distance matrix
-    M = ot.dist(coords1, coords2, metric='euclidean')
-    cost = ot.emd2(a, b, M, numItermax=1e6)  # total transport cost
-    return cost
-
-
-def prepare_measure(
-    X: np.ndarray, 
-    Y: np.ndarray, 
-    normalize: bool=True, 
-    shift_nonneg: bool=False, 
-    clip_min_to_zero: bool=True
-) -> tuple[np.ndarray, np.ndarray]:
-    """Prepare the input features and target masses for the metric computation.
-
-    Args:
-        X (np.ndarray): Input features of shape (N, d).
-        Y (np.ndarray): Input target values of shape (N,).
-        normalize (bool, optional): Whether to normalize the masses. Defaults to True.
-        shift_nonneg (bool, optional): Whether to shift the masses to be non-negative. Defaults to False.
-        clip_min_to_zero (bool, optional): Whether to clip the masses to be non-negative. Defaults to True.
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray]: Prepared input features and target masses.
-    """
-    assert not (shift_nonneg and clip_min_to_zero), "Only one of shift_nonneg and clip_min_to_zero can be True"
-
-    masses = Y.astype(float)
-    if clip_min_to_zero:
-        masses = np.clip(masses, 0, None)
-    if shift_nonneg and masses.min() < 0 and not clip_min_to_zero:
-        masses = masses - masses.min()
-    masses[masses < 0] = 0.0
-    if normalize:
-        s = masses.sum()
-        if s > 0:
-            masses /= s
-    return X, masses
+    
+    scores = {}
+    ideal_x, ideal_y = 0.0, 0.0  # Ideal point for both metrics
+    
+    for exp in experiments_data['experiment'].unique():
+        # Extract trajectory
+        exp_data = experiments_data[experiments_data['experiment'] == exp]
+        x_data = exp_data[X].values
+        y_data = exp_data[Y].values
+        
+        if len(x_data) < 2:
+            scores[exp] = 0.0
+            continue
+        
+        # Compute trajectory derivatives
+        dx = np.diff(x_data)  # Δx_t = x_t - x_{t-1}
+        dy = np.diff(y_data)  # Δy_t = y_t - y_{t-1}
+        T = len(dx)  # Number of steps
+        
+        # Compute score based on method
+        if method == 'euclidean_improvement':
+            # L2 distance improvement
+            d_start = np.sqrt((x_data[0] - ideal_x)**2 + (y_data[0] - ideal_y)**2)
+            d_end = np.sqrt((x_data[-1] - ideal_x)**2 + (y_data[-1] - ideal_y)**2)
+            score = d_start - d_end
+            
+        elif method == 'manhattan_improvement':
+            # L1 distance improvement
+            d_start = np.abs(x_data[0] - ideal_x) + np.abs(y_data[0] - ideal_y)
+            d_end = np.abs(x_data[-1] - ideal_x) + np.abs(y_data[-1] - ideal_y)
+            score = d_start - d_end
+            
+        elif method == 'pareto_dominance':
+            # Pareto-improving steps with penalties
+            pareto_steps = (dx < 0) & (dy < 0)
+            pareto_count = np.sum(pareto_steps)
+            
+            # Forward improvement (when metrics decrease)
+            forward_x = np.sum(-dx[dx < 0])
+            forward_y = np.sum(-dy[dy < 0])
+            forward_improvement = forward_x + forward_y
+            
+            # Backward penalty (when metrics increase)
+            backward_x = np.sum(dx[dx > 0])
+            backward_y = np.sum(dy[dy > 0])
+            backward_penalty = backward_x + backward_y
+            
+            # Combined score: weight Pareto steps highly, add improvements, subtract penalties
+            pareto_weight = 1.0  # Weight for each Pareto-improving step
+            score = pareto_weight * pareto_count + forward_improvement - backward_penalty
+            
+        elif method == 'average_descent':
+            # Mean per-step improvement (negative gradient toward origin)
+            # Higher negative (dx + dy) means better descent
+            per_step_improvement = -(dx + dy)
+            score = np.mean(per_step_improvement)
+            normalize = False  # Already normalized by taking mean
+            
+        elif method == 'efficiency_ratio':
+            # Path straightness: direct distance / actual path length
+            direct_distance = np.sqrt((x_data[-1] - x_data[0])**2 + 
+                                     (y_data[-1] - y_data[0])**2)
+            
+            step_distances = np.sqrt(dx**2 + dy**2)
+            path_length = np.sum(step_distances)
+            
+            if path_length > 0:
+                score = direct_distance / path_length
+            else:
+                score = 0.0
+            
+            # Also consider if we're moving toward origin (not away)
+            if x_data[-1] > x_data[0] or y_data[-1] > y_data[0]:
+                score *= -1  # Penalize if ending farther from origin
+                
+            normalize = False  # Ratio is already normalized
+            
+        elif method == 'weighted_improvement':
+            # Weighted distance improvement
+            d_start = np.sqrt(weight_x * (x_data[0] - ideal_x)**2 + 
+                            weight_y * (y_data[0] - ideal_y)**2)
+            d_end = np.sqrt(weight_x * (x_data[-1] - ideal_x)**2 + 
+                          weight_y * (y_data[-1] - ideal_y)**2)
+            score = d_start - d_end
+            
+        else:
+            raise ValueError(f"Unknown method: {method}")
+        
+        # Normalize by number of steps if requested
+        # This makes experiments with different lengths comparable
+        if normalize and T > 0:
+            score = score / T
+        
+        scores[exp] = score
+    
+    return scores

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from typing import Literal, Tuple, Dict
+from typing import Literal, Tuple, Dict, List
 
 # --------------------------------------------------------------
 # CONSTANTS
@@ -22,7 +22,7 @@ def evaluate_cycle_metrics(
     y_uncertainty_val: np.ndarray | None,
     y_true_pool: np.ndarray,
     y_true_val: np.ndarray | None,
-) -> dict:
+) -> Dict[str, float]:
     """Evaluate cycle metrics.
 
     Args:
@@ -33,7 +33,7 @@ def evaluate_cycle_metrics(
         y_true_val (np.ndarray | None): True values for the validation set.
 
     Returns:
-        dict: Dictionary with evaluation metrics.
+        Dict[str, float]: Dictionary with evaluation metrics.
     """
     return {
         "y_best_predicted_pool": np.max(y_pred_pool),
@@ -215,3 +215,135 @@ def compute_experiment_scores(
         scores[exp] = score
     
     return scores
+
+
+def interpolate_simple_metric(
+    experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
+    value_col: str,
+    experiment_labels: List[str] = None,
+    gt_optimum_value: float = None,
+    normalize_by_initial: bool = True,
+    regret: bool = False,
+    percentiles: List[float] = [0.25, 0.5, 0.75, 1.0],
+) -> Tuple[Dict, pd.DataFrame]:
+    """Interpolates a metric over cumulative samples for multiple experiments.
+
+    Trajectories are interpolated per repetition onto a common sample grid before
+    averaging, so that different batch sizes (and hence different numbers of AL
+    cycles) are compared on a fair common axis of screened points.
+
+    Normalization is applied per repetition by dividing by the value at t=0
+    (the first trained-model evaluation), consistent with the normalized
+    convergence scores defined in the SI. This must be done before averaging
+    to avoid bias from repetitions with favorable or unfavorable initializations.
+
+    Args:
+        experiments: Mapping from experiment name to (points_df, metrics_df).
+        value_col: Column name of the metric to interpolate in metrics_df.
+        experiment_labels: Optional list of labels to rename experiment keys.
+        gt_optimum_value: Reference optimum used to compute regret when
+            regret=True. Must be provided if regret=True.
+        normalize_by_initial: If True, divide each repetition's trajectory by
+            its value at t=0 (per-repetition normalization). Default True.
+        regret: If True, compute r_t = gt_optimum_value - value before
+            normalization.
+        percentiles: Fractions of max_samples at which to snapshot metrics.
+
+    Returns:
+        interpolated_results: Dict keyed by experiment name with entries:
+            - 'common_samples': shared sample grid (length max_samples)
+            - 'interpolated_mean': mean of normalized interpolated trajectories
+            - 'interpolated_std': std of normalized interpolated trajectories
+            - 'raw_mean': mean of raw (non-interpolated) trajectories per cycle
+            - 'raw_std': std of raw trajectories per cycle
+        percentiles_df: DataFrame with mean and std at each percentile checkpoint.
+    """
+    if experiment_labels is not None:
+        experiments = dict(zip(experiment_labels, experiments.values()))
+
+    if regret and gt_optimum_value is None:
+        raise ValueError("gt_optimum_value must be provided when regret=True.")
+
+    interpolated_results = {}
+    percentiles_csv_rows = []
+
+    for exp_name, (points_df, metrics_df) in experiments.items():
+        all_curves_samples = []
+        all_curves_values = []
+        all_interp_values = []
+
+        repetitions = metrics_df['repetition'].unique()
+
+        for rep in repetitions:
+            rep_metrics = metrics_df[metrics_df['repetition'] == rep].sort_values('cycle')
+            rep_points = points_df[points_df['repetition'] == rep].sort_values('cycle')
+
+            # Cumulative samples at each cycle, excluding cycle-0 initialization
+            # so that cycle 0 maps to n=0 (first surrogate evaluation point)
+            cumulative_samples = []
+            for cycle in rep_metrics['cycle'].values:
+                n_samples = (
+                    len(rep_points[rep_points['cycle'] <= cycle])
+                    - len(rep_points[rep_points['cycle'] == 0])
+                )
+                cumulative_samples.append(n_samples)
+            cumulative_samples = np.array(cumulative_samples)
+
+            values = rep_metrics[value_col].values.astype(float)
+
+            # Compute regret before normalization
+            if regret:
+                values = gt_optimum_value - values
+
+            # Per-repetition normalization by the initial value (t=0)
+            # This corresponds to tilde_r_t = r_t / r_0^(s) in the SI notation
+            if normalize_by_initial:
+                v0 = values[0]
+                if v0 == 0.0:
+                    raise ValueError(
+                        f"Initial value for repetition {rep} of experiment "
+                        f"'{exp_name}' is zero; cannot normalize by initial value."
+                    )
+                values = values / v0
+
+            all_curves_samples.append(cumulative_samples)
+            all_curves_values.append(values)
+
+        # Common grid: integer steps from 0 to max observed sample count
+        max_samples = max(s[-1] for s in all_curves_samples)
+        common_samples = np.arange(0, max_samples + 1, dtype=float)
+
+        for samples, values in zip(all_curves_samples, all_curves_values):
+            # np.interp: flat extrapolation at left boundary (below first sample)
+            # is only safe if cycle 0 is present and maps to common_samples[0]=0.
+            # Verified by the cumulative_samples construction above.
+            interp_vals = np.interp(common_samples, samples, values)
+            all_interp_values.append(interp_vals)
+
+        all_interp_values = np.array(all_interp_values)  # (n_reps, max_samples+1)
+
+        interpolated_results[exp_name] = {
+            'common_samples': common_samples,
+            'interpolated_mean': all_interp_values.mean(axis=0),
+            'interpolated_std': all_interp_values.std(axis=0),
+            # Raw (non-interpolated) mean/std per cycle — only valid within one
+            # experiment where all repetitions share the same number of cycles
+            'raw_mean': np.mean(all_curves_values, axis=0),
+            'raw_std': np.std(all_curves_values, axis=0),
+        }
+
+        # Snapshot at requested percentile checkpoints
+        for p in percentiles:
+            target_sample = p * max_samples
+            closest_idx = int(np.abs(common_samples - target_sample).argmin())
+            percentiles_csv_rows.append({
+                'experiment': exp_name,
+                f'{value_col}_mean': all_interp_values[:, closest_idx].mean(),
+                f'{value_col}_std': all_interp_values[:, closest_idx].std(),
+                'sample_percentile': p,
+                'samples_at_percentile': common_samples[closest_idx],
+            })
+
+    percentiles_df = pd.DataFrame(percentiles_csv_rows)
+    return interpolated_results, percentiles_df
+

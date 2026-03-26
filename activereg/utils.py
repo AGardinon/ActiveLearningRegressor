@@ -3,6 +3,7 @@
 import json
 import shutil
 import numpy as np
+import pandas as pd
 from torch import Tensor
 from torch.utils.data import TensorDataset, DataLoader
 from scipy.spatial import cKDTree
@@ -32,6 +33,43 @@ def create_experiment_name(name_set: Tuple) -> str:
     exp_name_list = [str(i) for i in name_set]
     exp_name = exp_name_list[0]+"_".join(exp_name_list[1:])
     return exp_name
+
+
+def prepare_experiments_list(experiments):
+    """Prepare a list of experiments for comparison.
+
+    Args:
+        experiments (List[Tuple[str, str]]): List of experiments with their paths and labels.
+
+    Returns:
+        Tuple[Dict[str, Tuple[pd.DataFrame, pd.DataFrame]], List[str]]: Dictionary of experiments and list of labels.
+    """
+    exp_paths = [exp[0] for exp in experiments]
+    exp_dict = prepare_multiple_experiments(exp_paths, base_path=Path.cwd())
+    labels = [exp[1] for exp in experiments]
+    return exp_dict, labels
+
+
+def prepare_multiple_experiments(experiment_paths: List[str], base_path: str) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
+    """
+    Load multiple experiments for comparison.
+    
+    Args:
+        experiment_paths: {exp_name: (points_csv_path, metrics_csv_path)}
+        base_path: Base path to prepend to experiment paths.
+    
+    Returns:
+        {exp_name: (points_df, metrics_df)}
+    """
+    POINTS_PATHS = "train_points_data.csv"
+    METRICS_PATHS = "benchmark_data.csv"
+
+    experiments = {}
+    for exp_name in experiment_paths:
+        points_df = pd.read_csv(Path(base_path) / exp_name / POINTS_PATHS)
+        metrics_df = pd.read_csv(Path(base_path) / exp_name / METRICS_PATHS)
+        experiments[exp_name] = (points_df, metrics_df)
+    return experiments
 
 # --------------------------------------------------------------------------------
 # SYNTHETIC DATA CREATION

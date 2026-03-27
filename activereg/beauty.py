@@ -276,7 +276,7 @@ def plot_time_to_threshold(
         means = threshold_df[f"{int(thresh*100)}%_mean"].values
         stds = threshold_df[f"{int(thresh*100)}%_std"].values
 
-        ax.bar(x + offsets[i], means, width=bar_width, label=f"{int(thresh*100)}%", color=colors[i], yerr=stds, capsize=3.5, alpha=0.8)
+        ax.bar(x + offsets[i], means, width=bar_width, label=f"{int(thresh*100)}%", color=colors[i], yerr=stds, capsize=3., alpha=0.8)
 
         if plot_line:
             ax.scatter(x + offsets[i], means, color=colors[i], marker='o', edgecolor='black')

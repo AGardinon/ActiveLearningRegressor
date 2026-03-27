@@ -106,6 +106,111 @@ def mpiw(y_std: np.ndarray, confidence=CONFIDENCE) -> float:
 # Composite convergence metrics
 # --------------------------------------------------------------
 
+def compare_across_metrics(
+    experiments_data: pd.DataFrame,
+    X: str,
+    Y: str,
+    top_k: int = 3,
+    weight_x: float = 1.0,
+    weight_y: float = 1.0,
+    normalize: bool = True,
+    methods: List[Literal['euclidean_improvement', 'manhattan_improvement', 'pareto_dominance', 
+                    'average_descent', 'efficiency_ratio', 'weighted_improvement']] = None
+) -> Dict[str, Tuple[List[str], Dict[str, float]]]:
+    """Compare experiments across multiple composite metrics.
+
+    Args:
+        experiments_data (pd.DataFrame): DataFrame containing experiment trajectories with columns for 'experiment', X, and Y.
+        X (str): Column name for the X metric.
+        Y (str): Column name for the Y metric.
+        top_k (int, optional): Number of top experiments to return per method. Defaults to 3.
+        weight_x (float, optional): Weight for the X metric in weighted methods. Defaults to 1.0.
+        weight_y (float, optional): Weight for the Y metric in weighted methods. Defaults to 1.0.
+        normalize (bool, optional): Whether to normalize scores by trajectory length. Defaults to True.
+        methods (List[Literal[&#39;euclidean_improvement&#39;, &#39;manhattan_improvement&#39;, &#39;pareto_dominance&#39;, &#39;average_descent&#39;, &#39;efficiency_ratio&#39;, &#39;weighted_improvement&#39;], optional): List of scoring methods to compare. If None, defaults to all methods.
+
+    Returns:
+        Dict[str, Tuple[List[str], Dict[str, float]]]: Dictionary mapping method names to tuples of (top-k experiment names, all experiment scores).
+    """
+    if methods is None:
+        methods = ['euclidean_improvement', 'manhattan_improvement', 'pareto_dominance', 
+                   'average_descent', 'efficiency_ratio', 'weighted_improvement']
+    
+    print(f"Top {top_k} Experiments by Method:\n" + "="*60)
+
+    results = {}
+    for method in methods:
+        top_experiments, scores = get_top_k_experiments(
+            experiments_data=experiments_data,
+            X=X,
+            Y=Y,
+            method=method,
+            weight_x=weight_x,
+            weight_y=weight_y,
+            normalize=normalize,
+            top_k=top_k
+        )
+        results[method] = (top_experiments, scores)
+
+        print(f"\n{method.replace('_', ' ').title()}:")
+        for rank, exp in enumerate(top_experiments, start=1):
+            print(f"  {rank}. {exp:30s} (score: {scores[exp]:8.4f})")
+    
+    # Find consensus top experiments across methods
+    all_top_experiments = [exp for method_results in results.values() for exp in method_results[0]]
+    consensus_counts = pd.Series(all_top_experiments).value_counts()
+    consensus_top = consensus_counts[consensus_counts == consensus_counts.max()].index.tolist()
+
+    print("\nConsensus Top Experiments:")
+    for exp in consensus_top:
+        print(f"  {exp}")
+
+    return results
+
+
+def get_top_k_experiments(
+    experiments_data: pd.DataFrame,
+    X: str,
+    Y: str,
+    method: Literal['euclidean_improvement', 'manhattan_improvement', 'pareto_dominance', 
+                    'average_descent', 'efficiency_ratio', 'weighted_improvement'] = 'euclidean_improvement',
+    weight_x: float = 1.0,
+    weight_y: float = 1.0,
+    normalize: bool = True,
+    top_k: int = 3
+) -> Tuple[List[str], Dict[str, float]]:
+    """Get top-k experiments based on computed scores.
+
+    Args:
+        experiments_data (pd.DataFrame): DataFrame containing experiment trajectories with columns for 'experiment', X, and Y.
+        X (str): Column name for the X metric.
+        Y (str): Column name for the Y metric.
+        method (Literal[&#39;euclidean_improvement&#39;, &#39;manhattan_improvement&#39;, &#39;pareto_dominance&#39;, &#39;average_descent&#39;, &#39;efficiency_ratio&#39;, &#39;weighted_improvement&#39;], optional): Scoring method. Defaults to 'euclidean_improvement'.
+        weight_x (float, optional): Weight for the X metric. Defaults to 1.0.
+        weight_y (float, optional): Weight for the Y metric. Defaults to 1.0.
+        normalize (bool, optional): Whether to normalize the scores. Defaults to True.
+        top_k (int, optional): Number of top experiments to return. Defaults to 3.
+
+    Returns:
+        Tuple[List[str], Dict[str, float]]: A tuple containing a list of top-k experiment names and a dictionary of all experiment scores.
+    """
+    scores = compute_experiment_scores(
+        experiments_data=experiments_data,
+        X=X,
+        Y=Y,
+        method=method,
+        weight_x=weight_x,
+        weight_y=weight_y,
+        normalize=normalize
+    )
+    
+    # Sort experiments by score in descending order and return top-k keys
+    sorted_experiments = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    top_experiments = [exp for exp, score in sorted_experiments[:top_k]]
+    
+    return top_experiments, scores
+
+
 def compute_experiment_scores(
     experiments_data: pd.DataFrame,
     X: str,

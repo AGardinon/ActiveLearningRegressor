@@ -1,0 +1,9 @@
+#!
+import numpy as np
+from typing import Tuple, Protocol
+
+
+class MLModel(Protocol):
+    def train(self, X: np.ndarray, y: np.ndarray) -> None: ...
+    def predict(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: ...
+    def __repr__(self) -> str: ...

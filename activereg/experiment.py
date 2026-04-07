@@ -157,9 +157,19 @@ def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:
     """
     model_parameters_copy = model_parameters.copy()
     kernel_recipe = model_parameters_copy.pop('kernel_recipe', None)
-    assert kernel_recipe is not None, "Kernel recipe must be specified for GPR in the config file."
+    kernel_function = model_parameters_copy.pop('kernel', None)
 
-    kernel_recipe = get_gp_kernel(kernel_recipe)
+    # Assert that either kernel_recipe or kernel_function is provided, but not both
+    assert (kernel_recipe is not None) ^ (kernel_function is not None), \
+        "Either 'kernel_recipe' or 'kernel' must be provided in the model parameters, but not both."
+    
+    if kernel_function is not None:
+        # If kernel function is provided directly, use it
+        kernel_recipe = kernel_function
+
+    elif kernel_recipe is not None:
+        # If kernel recipe is provided, get the kernel from the recipe
+        kernel_recipe = get_gp_kernel(kernel_recipe)
 
     if 'alpha' in model_parameters_copy:
         model_parameters_copy['alpha'] = float(model_parameters_copy['alpha'])

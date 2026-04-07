@@ -276,7 +276,7 @@ def plot_time_to_threshold(
         means = threshold_df[f"{int(thresh*100)}%_mean"].values
         stds = threshold_df[f"{int(thresh*100)}%_std"].values
 
-        ax.bar(x + offsets[i], means, width=bar_width, label=f"{int(thresh*100)}%", color=colors[i], yerr=stds, capsize=3.5, alpha=0.8)
+        ax.bar(x + offsets[i], means, width=bar_width, label=f"{int(thresh*100)}%", color=colors[i], yerr=stds, capsize=3., alpha=0.8)
 
         if plot_line:
             ax.scatter(x + offsets[i], means, color=colors[i], marker='o', edgecolor='black')
@@ -809,29 +809,6 @@ def plot_metric_at_milestones_with_stats(
 
 # ---------------------------------------------------------------------------
 # --- PLOT UTILITIES
-
-
-def prepare_multiple_experiments(experiment_paths: List[str], base_path: str) -> Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]:
-    """
-    Load multiple experiments for comparison.
-    
-    Args:
-        experiment_paths: {exp_name: (points_csv_path, metrics_csv_path)}
-        base_path: Base path to prepend to experiment paths.
-    
-    Returns:
-        {exp_name: (points_df, metrics_df)}
-    """
-    POINTS_PATHS = "train_points_data.csv"
-    METRICS_PATHS = "benchmark_data.csv"
-
-    experiments = {}
-    for exp_name in experiment_paths:
-        points_df = pd.read_csv(Path(base_path) / exp_name / POINTS_PATHS)
-        metrics_df = pd.read_csv(Path(base_path) / exp_name / METRICS_PATHS)
-        experiments[exp_name] = (points_df, metrics_df)
-    return experiments
-
 
 def compute_time_to_threshold(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]], 

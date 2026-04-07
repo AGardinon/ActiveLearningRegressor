@@ -73,15 +73,26 @@ def get_custom_gp_kernel(kernel_recipe: list):
 # Default hyperparameter grids for grid search
 # ============================================================================
 
-GPR_PARAM_GRID = {
+GPR_MATERN_PARAM_GRID = {
     'kernel': [
-        ConstantKernel(1.0) * RBF(lc) + WhiteKernel(noise_level=noise)
+        ConstantKernel(1.0) * Matern(length_scale=lc, nu=2.5) + WhiteKernel(noise_level=noise)
         for lc in [0.01, 0.1, 1.0, 10.0]
-        for noise in [0.75, 0.5, 0.25, 0.1]
+        for noise in [0.5, 0.1]
     ],
-    'alpha': [1e-12, 1e-10, 1e-8, 1e-6, 1e-4],
+    'alpha': [1e-12, 1e-10, 1e-8, 1e-6],
     'normalize_y': [True, False],
-    'n_restarts_optimizer': [50],
+    'n_restarts_optimizer': [100],
+}
+
+GPR_RBF_PARAM_GRID = {
+    'kernel': [
+        ConstantKernel(1.0) * RBF(length_scale=lc) + WhiteKernel(noise_level=noise)
+        for lc in [0.01, 0.1, 1.0, 10.0]
+        for noise in [0.5, 0.1]
+    ],
+    'alpha': [1e-12, 1e-10, 1e-8, 1e-6],
+    'normalize_y': [True, False],
+    'n_restarts_optimizer': [100],
 }
 
 KNN_PARAM_GRID = {
@@ -90,7 +101,7 @@ KNN_PARAM_GRID = {
 }
 
 MLP_PARAM_GRID = {
-    'hidden_layers': [[32], [64], [32, 32], [64, 64]],
+    'hidden_layers': [[8], [16], [8, 8], [16, 16]],
     'lr': [1e-4, 1e-3, 1e-2],
     'lambda_anchor': [1e-5, 1e-4, 1e-3],
 }
@@ -218,3 +229,79 @@ def grid_search_cv(
         'best_score': best_score,
         'cv_results': cv_results,
     }
+
+
+def get_fixed_params(
+    config_params: Dict[str, Any],
+    param_grid: Dict[str, list],
+    exclude_keys: List[str] = None,
+) -> Dict[str, Any]:
+    """Returns config parameters not covered by a parameter grid.
+
+    Identifies which entries in ``config_params`` are absent from ``param_grid``
+    and should therefore be held fixed during grid search. The result is meant
+    to be passed to ``functools.partial`` to build the model factory.
+
+    Args:
+        config_params: Full model parameter dict from the config file.
+        param_grid: Parameter grid used for grid search (keys define what is searched).
+        exclude_keys: Keys in ``config_params`` to always exclude from the output,
+            regardless of whether they appear in the grid (e.g. ``'kernel_recipe'``
+            for GPR, which must be resolved to a kernel object before use).
+
+    Returns:
+        Dict of parameters from ``config_params`` whose keys are not in ``param_grid``.
+
+    Example:
+        >>> from functools import partial
+        >>> config = {'n_models': 5, 'in_feats': 6, 'out_feats': 1, 'hidden_layers': [64], 'lr': 1e-3}
+        >>> fixed = get_fixed_params(config, MLP_PARAM_GRID)
+        >>> # {'n_models': 5, 'in_feats': 6, 'out_feats': 1}
+        >>> factory = partial(AnchoredEnsembleMLP, **fixed)
+        >>> result = grid_search_cv(factory, MLP_PARAM_GRID, X_train, y_train)
+    """
+    exclude = set(exclude_keys or [])
+    return {
+        k: v for k, v in config_params.items()
+        if k not in param_grid and k not in exclude
+    }
+
+
+def merge_model_params(
+    config_params: Dict[str, Any],
+    best_params: Dict[str, Any],
+    exclude_from_config: List[str] = None,
+) -> Dict[str, Any]:
+    """Merges grid search best parameters with the full model config.
+
+    Grid search typically covers only a subset of model parameters. This function
+    fills in the remaining parameters from the config so the resulting dict is
+    complete for model re-initialization.
+
+    Parameters present in both dicts use the value from ``best_params`` (the
+    optimized value). Parameters only in ``config_params`` are carried over as-is.
+
+    Args:
+        config_params: Full model parameter dict from the config file.
+        best_params: Best parameter dict returned by grid search (subset of params).
+        exclude_from_config: Keys in ``config_params`` to drop before merging.
+            Useful when a config key conflicts with a ``best_params`` key
+            (e.g. ``'kernel_recipe'`` vs ``'kernel'`` for GPR).
+
+    Returns:
+        Merged parameter dict suitable for model re-initialization.
+
+    Example:
+        >>> config = {'kernel_recipe': 'RBF_W', 'alpha': 1e-10, 'n_restarts_optimizer': 0}
+        >>> best = {'kernel': ConstantKernel() * RBF(0.1), 'alpha': 1e-6}
+        >>> merged = merge_model_params(config, best, exclude_from_config=['kernel_recipe'])
+        >>> # {'alpha': 1e-6, 'n_restarts_optimizer': 0, 'kernel': ConstantKernel() * RBF(0.1)}
+        >>> model = GPR(**merged)
+    """
+    base = config_params.copy()
+    if exclude_from_config:
+        for key in exclude_from_config:
+            base.pop(key, None)
+    base.update(best_params)
+    return base
+

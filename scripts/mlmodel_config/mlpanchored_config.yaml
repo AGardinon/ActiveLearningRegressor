@@ -8,9 +8,13 @@ model_parameters:
   n_models: 5
   in_feats: 6
   out_feats: 1
-  hidden_layers: [16, 16]
+  hidden_layers: [8]
   activation: "relu"
   lambda_anchor: 0.0001
   lr: 0.001
   n_epochs: 250
   device: "cpu"  # Use "cpu" or "cuda" to force device, or null to auto-select
+
+grid_search:
+  perform_grid_search: true
+  every_n_points: 10  # Perform grid search every N acquired points

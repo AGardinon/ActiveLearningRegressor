@@ -181,4 +181,6 @@ datasets/
 scripts/*.out
 PAPER.md
 
+# Claude code stuff
+CLAUDE.md
 

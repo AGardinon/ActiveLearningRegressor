@@ -3,8 +3,8 @@
 # ------------------------------------------------------------------------------
 SEED: null
 
-experiment_name: "6D/ackley_knn_100cy_2pts_1stage_1_1"
-experiment_notes: "Benchmarking the Ackley 6D function"
+experiment_name: "6D/ackley_mlpa_100cy_2pts_1stage_1_1_gridsearch"
+experiment_notes: "Benchmarking the Ackley 6D function with MLP Anchored Ensemble and grid search"
 
 # --------------------------------------------------------------
 # Ground truth data configuration

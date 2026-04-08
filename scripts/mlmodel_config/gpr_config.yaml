@@ -10,5 +10,8 @@ model_parameters:
   alpha: 1e-10
   normalize_y: true
   optimizer: 'fmin_l_bfgs_b'
-  use_gridsearch: false
   log_transform: false
+
+grid_search:
+  perform_grid_search: false
+  every_n_points: 10  # Perform grid search every N acquired points

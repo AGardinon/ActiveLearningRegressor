@@ -9,3 +9,7 @@ model_parameters:
   length_scale : 1.0
   noise_floor : 0.000001
   distance_penalty : 0.0
+
+grid_search:
+  perform_grid_search: true
+  every_n_points: 10  # Perform grid search every N acquired points

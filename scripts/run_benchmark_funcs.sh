@@ -14,7 +14,7 @@ PY_SCRIPT="benchmark_functions.py"
 BENCHMARK_CONFIG="general_config/benchmark_config.yaml"
 ACQ_MODE_CONFIG="general_config/acquisition_mode_settings.yaml"
 TGT_FUNC_CONFIG="general_config/target_function_config.yaml"
-ML_MODEL_CONFIG="mlmodel_config/gpr_config.yaml"
+ML_MODEL_CONFIG="mlmodel_config/mlpanchored_config.yaml"
 
 #######################################
 # Help function
@@ -99,6 +99,11 @@ fi
 #######################################
 # Run experiment
 #######################################
+
+# echo the full command for transparency
+echo "Executing command:"
+echo "python $PY_SCRIPT --benchmark_config $BENCHMARK_CONFIG --model_config $ML_MODEL_CONFIG --acquisition_mode_settings $ACQ_MODE_CONFIG --target_function_config $TGT_FUNC_CONFIG --repetitions $N_REPS $PY_FLAGS > $LOG_FILE"
+echo ""
 
 python $PY_SCRIPT \
     --benchmark_config $BENCHMARK_CONFIG \

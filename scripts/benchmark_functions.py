@@ -47,12 +47,40 @@ from activereg.experiment import (get_gt_dataframes,
                                   remove_evidence_from_gt,
                                   setup_experiment_variables,
                                   AcquisitionParametersGenerator)
+from activereg.hyperparams import (get_fixed_params, 
+                                   merge_model_params, 
+                                   grid_search_cv)
 from activereg.benchmarkFunctions import FUNCTION_CLASSES, FUNCTIONS_DICT
 from typing import List, Tuple
 from sklearn.base import BaseEstimator
+from functools import partial
 
 # --------------------------------------------------------------------------------
 # FUNCTIONS
+
+def setup_gridsearch(ml_model_name: str) -> dict:
+    """Sets up the grid search parameters for the specified machine learning model.
+
+    Args:
+        ml_model_name (str): Name of the machine learning model.
+
+    Raises:
+        ValueError: If the specified ML model is not supported.
+
+    Returns:
+        dict: The parameter grid for the specified ML model.
+    """
+    from activereg.hyperparams import GPR_MATERN_PARAM_GRID, MLP_PARAM_GRID, KNN_PARAM_GRID
+    if ml_model_name == 'GPR':
+        param_grid = GPR_MATERN_PARAM_GRID
+    elif ml_model_name == 'AnchoredEnsembleMLP':
+        param_grid = MLP_PARAM_GRID
+    elif ml_model_name == 'kNNRegressorAL':
+        param_grid = KNN_PARAM_GRID
+    else:
+        raise ValueError(f"Unsupported ML model for grid search: {ml_model_name}")
+    return param_grid
+
 
 def create_benchmark_path(exp_name: str, overwrite: bool=False) -> Path:
     """Creates the benchmark experiment folder.
@@ -221,6 +249,21 @@ if __name__ == '__main__':
     ml_model_type = model_config.get('ml_model', None)
     ml_model_params = model_config.get('model_parameters', {})
     assert ml_model_type is not None, "ML model type must be specified in the model_config file."
+
+    perform_grid_search = model_config.get('grid_search', {}).get('perform_grid_search', False)
+    if perform_grid_search:
+        print("Grid search activated for hyperparameter tuning.")
+        param_grid = setup_gridsearch(ml_model_name=ml_model_type)
+        gridsearch_every_n_points = model_config.get('grid_search', {}).get('every_n_points', 10)
+        print(f"Grid search will be performed every {gridsearch_every_n_points} acquired points during the experiment.")
+
+        # Create a folder to store the grid search results and best hyperparameters for each grid search step
+        grid_search_results_path = BENCHMARK_PATH / 'grid_search_results'
+        grid_search_results_path.mkdir(exist_ok=True)
+
+        fixed_model_params = get_fixed_params(config_params=ml_model_params, param_grid=param_grid)
+        with open(grid_search_results_path / 'grid_search_fixed_params.yaml', 'w') as f:
+            yaml.dump(fixed_model_params, f)
     # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
@@ -413,7 +456,7 @@ if __name__ == '__main__':
     for rep in range(N_REPS):
 
         # --------------------------------------------------------------------------------
-        # SET UP THE MODEL
+        # SET UP THE MODEL (params from the config file)
         ML_MODEL = setup_ml_model(ml_model_type=ml_model_type, ml_model_params=ml_model_params)
         # --------------------------------------------------------------------------------
 
@@ -423,6 +466,11 @@ if __name__ == '__main__':
         if refine_generator is not None:
             refine_counter = 0
             next_refine_target = refine_step
+
+        # Grid search tracking per repetition
+        if perform_grid_search is True:
+            grid_search_counter = 0  # to track when to perform grid search during the cycles
+            next_grid_search_target = gridsearch_every_n_points
 
         # --------------------------------------------------------------------------------
         # CYCLE 0 - INITIAL SAMPLING
@@ -453,12 +501,46 @@ if __name__ == '__main__':
                 "acquisition_source": INIT_SAMPLING if evidence_df is None else "evidence",
                 "y_value": y_train[i][0]
             })
+
+        # !!! Careful
+        n_points_acquired = len(X_train)
         # END of initial sampling
         # --------------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------------
         # CYCLES 1 -> N_CYCLES
         for cycle in tqdm(range(N_CYCLES), desc=f"Repetition {rep+1}/{N_REPS}"):
+            print(f"points acquired so far: {n_points_acquired, len(X_train)}")
+            # ----------------------------------------------------------------------------
+            # Grid search step (every N acquired points as defined in the config file)
+            if perform_grid_search is True and n_points_acquired >= next_grid_search_target:
+                grid_search_counter += 1
+                # Create a factory function with the fixed params for the base model class
+                base_model_factory = partial(ML_MODEL.__class__, **fixed_model_params)
+                # Perform grid search cross-validation and get the best hyperparameters
+                gridsearch_result = grid_search_cv(
+                    model_factory=base_model_factory,
+                    param_grid=param_grid,
+                    X=X_train,
+                    y=y_train,
+                    scoring='neg_mean_squared_error',
+                    verbose=1
+                )
+
+                # Save the grid search results and best hyperparameters for this step
+                grid_search_step_path = grid_search_results_path / f'grid_search_rep{rep+1}_cycle{cycle+1}.yaml'
+                with open(grid_search_step_path, 'w') as f:
+                    yaml.dump(gridsearch_result, f)
+
+                best_params = gridsearch_result['best_params']
+                merge_best_params = merge_model_params(
+                    config_params=ml_model_params, best_params=best_params, exclude_from_config=['kernel_recipe']
+                )
+                # Update the ML_MODEL with the new best hyperparameters found
+                ML_MODEL = setup_ml_model(ml_model_type=ml_model_type, ml_model_params=merge_best_params)
+
+                next_grid_search_target += gridsearch_every_n_points
+            # ----------------------------------------------------------------------------
 
             # Get the acquisition parameters for the current cycle
             # Predefined acquisition modes for tracking the source of acquisition of each point
@@ -521,13 +603,13 @@ if __name__ == '__main__':
             # END of cycles
             # -------------------------------------------------------------------------------- 
 
+            n_points_acquired += len(sampled_indexes)
+
             # --------------------------------------------------------------------------------
             # Adaptive refinement of candidates pool if defined in the config file
             # TODO: consider refactoring into a class or function for better readability and modularity
             if refine_generator is not None:
 
-                # TODO: check for possible inconsistencies in the countig of acquired points
-                n_points_acquired = (cycle + 1) * sum([acp['n_points'] for acp in cycle_acqui_params]) + (INIT_BATCH if evidence_df is None else 0)
                 if n_points_acquired >= next_refine_target:
                     refine_counter += 1
 

@@ -5,7 +5,7 @@
 # Function settings
 function_parameters:
   function: "Ackley6D"  # "Hartmann" or "Ackley" or "StyblinskiTang"
-  custom: False  # whether to use a custom function defined in a separate file (if true, the 'function' parameter will be ignored and the function will be imported from the specified file)
+  custom: false  # whether to use a custom function defined in a separate file (if true, the 'function' parameter will be ignored and the function will be imported from the specified file)
   n_dimensions: null  # number of dimensions of the function (if null, it will be inferred from the bounds or from the ground truth file if provided)
   bounds: null  # bounds of the function (if null, it will be inferred from the ground truth file if provided or set to default bounds for the selected function)
 

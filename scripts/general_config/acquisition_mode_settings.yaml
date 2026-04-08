@@ -14,6 +14,8 @@ acquisition_parameters:
 
   - acquisition_mode: "exploration_mutual_info"
 
+  - acquisition_mode: "uncertainty_landscape"
+
   - acquisition_mode: "percentage_target_expected_improvement"
     percentage: 70
 

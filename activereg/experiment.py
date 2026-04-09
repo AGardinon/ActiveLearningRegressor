@@ -132,12 +132,12 @@ def setup_ml_model(ml_model_type: str, ml_model_params: dict) -> regmodels.MLMod
         return create_gpr_instance(ml_model_params)
     elif ml_model_type == 'AnchoredEnsembleMLP':
         return create_anchored_ensemble_mlp(ml_model_params)
-    elif ml_model_type == 'kNNRegressor':
+    elif ml_model_type == 'kNNRegressorAL':
         return create_knn_instance(ml_model_params)
     elif ml_model_type == 'BayesianNN':
         return create_bnn_instance(ml_model_params)
     else:
-        raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP', 'kNNRegressor', 'BayesianNN'].")
+        raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP', 'kNNRegressorAL', 'BayesianNN'].")
 
 
 def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:

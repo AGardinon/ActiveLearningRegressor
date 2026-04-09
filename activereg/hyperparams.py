@@ -96,8 +96,8 @@ GPR_RBF_PARAM_GRID = {
 }
 
 KNN_PARAM_GRID = {
-    'k': [3, 5, 10, 15, 20],
-    'length_scale': [0.1, 0.5, 1.0, 5.0, 10.0],
+    'k': [3, 5, 10, 20],
+    'length_scale': [1.0, 5.0, 10.0],
 }
 
 MLP_PARAM_GRID = {

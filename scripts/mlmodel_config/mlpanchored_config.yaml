@@ -17,4 +17,4 @@ model_parameters:
 
 grid_search:
   perform_grid_search: true
-  every_n_points: 10  # Perform grid search every N acquired points
+  every_n_points: 20  # Perform grid search every N acquired points

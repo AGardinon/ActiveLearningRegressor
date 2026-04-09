@@ -3,14 +3,14 @@
 # ------------------------------------------------------------------------------
 SEED: null
 
-experiment_name: "6D/ackley_mlpa_100cy_2pts_1stage_1_1_gridsearch"
-experiment_notes: "Benchmarking the Ackley 6D function with MLP Anchored Ensemble and grid search"
+experiment_name: "6D/styblinskitang_mlpa_20cy_10pts_1stage_8_2_gridsearch"
+experiment_notes: "Benchmarking the Styblinski-Tang 6D function with MLPA Regressor and grid search"
 
 # --------------------------------------------------------------
 # Ground truth data configuration
 # available options: 
 # - 6D: "hartmann6d_lhs_1M.csv", "ackley6d_lhs_1M.csv", "styblinskitang6d_lhs_1M.csv"
-ground_truth_file: "ackley6d_lhs_1M.csv"
+ground_truth_file: "styblinskitang6d_lhs_1M.csv"
 experiment_evidence: null
 
 # --------------------------------------------------------------
@@ -33,8 +33,8 @@ scaler_params: null
 
 # --------------------------------------------------------------
 # Cycles parameters
-n_cycles: 100
-init_batch_size: 2
+n_cycles: 20
+init_batch_size: 10
 init_sampling: "random"
 
 landscape_penalization: null  # radius: 0.25, strength: 1.0
@@ -50,9 +50,9 @@ batch_selection:
 # Multi-stage acquisition protocol configuration
 acquisition_protocol:
   stage_1:
-    cycles: 100
+    cycles: 20
     acquisition_modes: ['uncertainty_landscape', 'expected_improvement']
-    n_points: [1, 1]  # Number of points to acquire for each mode in stage 1
+    n_points: [2, 8]  # Number of points to acquire for each mode in stage 1
   # stage_2:
   #   cycles: 40
   #   acquisition_modes: ['expected_improvement']

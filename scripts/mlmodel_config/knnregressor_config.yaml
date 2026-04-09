@@ -2,7 +2,7 @@
 # KNN Regressor configuration file for in-silico experiment
 # ------------------------------------------------------------------------------
 
-ml_model: "kNNRegressor"
+ml_model: "kNNRegressorAL"
 
 model_parameters:
   k : 10
@@ -12,4 +12,4 @@ model_parameters:
 
 grid_search:
   perform_grid_search: true
-  every_n_points: 10  # Perform grid search every N acquired points
+  every_n_points: 20  # Perform grid search every N acquired points

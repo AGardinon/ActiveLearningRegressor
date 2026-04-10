@@ -143,7 +143,7 @@ def setup_ml_model(ml_model_type: str, ml_model_params: dict) -> regmodels.MLMod
 def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:
     """Creates a Gaussian Process Regressor instance.
     Dictionary must contain the following keys:
-        - kernel_recipe (str or list): Recipe for the GP kernel. See `get_gp_kernel` and `KernelFactory` for details.
+        - kernel (str or list): Recipe for the GP kernel. See `get_gp_kernel` and `KernelFactory` for details.
         - alpha (float): Value added to the diagonal of the kernel matrix during fitting. Default is 1e-10.
         - optimizer (str or callable): Optimizer to use for kernel hyperparameter optimization. Default is 'fmin_l_bfgs_b'.
         - n_restarts_optimizer (int): Number of restarts for the optimizer. Default is 0.
@@ -156,20 +156,13 @@ def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:
         regmodels.MLModel: The created Gaussian Process Regressor instance.
     """
     model_parameters_copy = model_parameters.copy()
-    kernel_recipe = model_parameters_copy.pop('kernel_recipe', None)
     kernel_function = model_parameters_copy.pop('kernel', None)
 
-    # Assert that either kernel_recipe or kernel_function is provided, but not both
-    assert (kernel_recipe is not None) ^ (kernel_function is not None), \
-        "Either 'kernel_recipe' or 'kernel' must be provided in the model parameters, but not both."
+    # Assert that kernel_function is provided
+    assert kernel_function is not None, \
+        "'kernel' must be provided in the model parameters."
     
-    if kernel_function is not None:
-        # If kernel function is provided directly, use it
-        kernel_recipe = kernel_function
-
-    elif kernel_recipe is not None:
-        # If kernel recipe is provided, get the kernel from the recipe
-        kernel_recipe = get_gp_kernel(kernel_recipe)
+    kernel_recipe = get_gp_kernel(kernel_function)
 
     if 'alpha' in model_parameters_copy:
         model_parameters_copy['alpha'] = float(model_parameters_copy['alpha'])

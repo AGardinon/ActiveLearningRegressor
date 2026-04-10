@@ -5,13 +5,13 @@
 ml_model: "GPR"
 
 model_parameters:
-  kernel_recipe: "MATERN_W"  # "RBF_W" or "MATERN_W" or custom recipe
-  n_restarts_optimizer: 300
+  kernel: "MATERN_W"  # "RBF_W" or "MATERN_W" or custom recipe
+  n_restarts_optimizer: 150
   alpha: 1e-10
   normalize_y: true
   optimizer: 'fmin_l_bfgs_b'
   log_transform: false
 
 grid_search:
-  perform_grid_search: false
-  every_n_points: 10  # Perform grid search every N acquired points
+  perform_grid_search: true
+  every_n_points: 20  # Perform grid search every N acquired points

@@ -527,15 +527,16 @@ if __name__ == '__main__':
                     verbose=1
                 )
 
-                # Save the grid search results and best hyperparameters for this step
-                grid_search_step_path = grid_search_results_path / f'grid_search_rep{rep+1}_cycle{cycle+1}.yaml'
-                with open(grid_search_step_path, 'w') as f:
-                    yaml.dump(gridsearch_result, f)
+                # TODO: fix bug with saving of the parameters, as it saves non text serializable objects in the yaml file,
+                # need to convert them to string or find a way to save only the relevant information for the parameters (e.g. for the kernel, save the recipe or the name instead of the whole kernel object)
+
+                # # Save the grid search results and best hyperparameters for this step
+                # grid_search_step_path = grid_search_results_path / f'grid_search_rep{rep+1}_cycle{cycle+1}.yaml'
+                # with open(grid_search_step_path, 'w') as f:
+                #     yaml.dump(gridsearch_result, f)
 
                 best_params = gridsearch_result['best_params']
-                merge_best_params = merge_model_params(
-                    config_params=ml_model_params, best_params=best_params, exclude_from_config=['kernel_recipe']
-                )
+                merge_best_params = merge_model_params(config_params=ml_model_params, best_params=best_params)
                 # Update the ML_MODEL with the new best hyperparameters found
                 ML_MODEL = setup_ml_model(ml_model_type=ml_model_type, ml_model_params=merge_best_params)
 

@@ -15,8 +15,8 @@ from sklearn.metrics import mean_squared_error, r2_score
 # ============================================================================
 
 GPR_KERNELS = {
-    'RBF_W': ConstantKernel() * RBF(length_scale=1.0) + WhiteKernel(noise_level=1.),
-    'MATERN_W': ConstantKernel() * Matern(length_scale=1.0, nu=2.5) + WhiteKernel(noise_level=1.),
+    'RBF_W': ConstantKernel() * RBF(length_scale=1.0) + WhiteKernel(noise_level=0.1),
+    'MATERN_W': ConstantKernel() * Matern(length_scale=1.0, nu=2.5) + WhiteKernel(noise_level=0.1),
 }
 
 # Backward compatibility alias
@@ -39,7 +39,7 @@ def get_gp_kernel(kernel_recipe: Union[str, list]):
         return get_custom_gp_kernel(kernel_recipe)
 
     else:
-        raise ValueError("kernel_recipe must be either a string or a list.")
+        return kernel_recipe  # Assume it's already a kernel object or a valid sklearn kernel
 
 
 def get_default_gp_kernel(kernel_recipe: str):
@@ -76,21 +76,21 @@ def get_custom_gp_kernel(kernel_recipe: list):
 GPR_MATERN_PARAM_GRID = {
     'kernel': [
         ConstantKernel(1.0) * Matern(length_scale=lc, nu=2.5) + WhiteKernel(noise_level=noise)
-        for lc in [0.01, 0.1, 1.0, 10.0]
+        for lc in [0.01, 0.1, 1.0]
         for noise in [0.5, 0.1]
     ],
-    'alpha': [1e-12, 1e-10, 1e-8, 1e-6],
+    'alpha': [1e-12, 1e-8],
     'normalize_y': [True, False],
-    'n_restarts_optimizer': [100],
+    'n_restarts_optimizer': [150],
 }
 
 GPR_RBF_PARAM_GRID = {
     'kernel': [
         ConstantKernel(1.0) * RBF(length_scale=lc) + WhiteKernel(noise_level=noise)
-        for lc in [0.01, 0.1, 1.0, 10.0]
+        for lc in [0.01, 0.1, 1.0]
         for noise in [0.5, 0.1]
     ],
-    'alpha': [1e-12, 1e-10, 1e-8, 1e-6],
+    'alpha': [1e-12, 1e-8],
     'normalize_y': [True, False],
     'n_restarts_optimizer': [100],
 }

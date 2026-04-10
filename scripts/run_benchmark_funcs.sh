@@ -14,7 +14,7 @@ PY_SCRIPT="benchmark_functions.py"
 BENCHMARK_CONFIG="general_config/benchmark_config.yaml"
 ACQ_MODE_CONFIG="general_config/acquisition_mode_settings.yaml"
 TGT_FUNC_CONFIG="general_config/target_function_config.yaml"
-ML_MODEL_CONFIG="mlmodel_config/mlpanchored_config.yaml"
+ML_MODEL_CONFIG="mlmodel_config/gpr_config.yaml"
 
 #######################################
 # Help function

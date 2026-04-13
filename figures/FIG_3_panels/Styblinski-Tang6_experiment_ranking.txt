@@ -1,32 +1,32 @@
 Pareto Dominance:
   1. 3+2(GPR)                       Score:   0.6561
-  2. 8+2(MLP)                       Score:   0.6220
-  3. 8+2(GPR)                       Score:   0.6029
-  4. 3+2(MLP)                       Score:   0.5041
-  5. 1+1(GPR)                       Score:   0.5024
-  6. 1+1(kNN)                       Score:   0.4793
-  7. 8+2(kNN)                       Score:   0.4416
-  8. 1+1(MLP)                       Score:   0.4112
-  9. 3+2(kNN)                       Score:   0.3383
+  2. 8+2(GPR)                       Score:   0.6029
+  3. 1+1(kNN)                       Score:   0.5697
+  4. 3+2(kNN)                       Score:   0.5455
+  5. 8+2(kNN)                       Score:   0.5417
+  6. 1+1(GPR)                       Score:   0.5024
+  7. 3+2(MLP)                       Score:   0.4757
+  8. 8+2(MLP)                       Score:   0.4721
+  9. 1+1(MLP)                       Score:   0.4679
 
 Manhattan Improvement:
-  1. 8+2(MLP)                       Score:   0.0720
-  2. 1+1(MLP)                       Score:   0.0612
-  3. 3+2(GPR)                       Score:   0.0561
-  4. 3+2(MLP)                       Score:   0.0541
+  1. 3+2(MLP)                       Score:   0.0757
+  2. 8+2(MLP)                       Score:   0.0721
+  3. 1+1(MLP)                       Score:   0.0679
+  4. 3+2(GPR)                       Score:   0.0561
   5. 8+2(GPR)                       Score:   0.0529
   6. 1+1(GPR)                       Score:   0.0524
-  7. 8+2(kNN)                       Score:   0.0416
-  8. 3+2(kNN)                       Score:   0.0383
-  9. 1+1(kNN)                       Score:   0.0293
+  7. 3+2(kNN)                       Score:   0.0455
+  8. 8+2(kNN)                       Score:   0.0417
+  9. 1+1(kNN)                       Score:   0.0197
 
 ==========Consensus (appears in multiple methods)===========
   3+2(GPR)                       appears in 2/2 methods
-  8+2(MLP)                       appears in 2/2 methods
   8+2(GPR)                       appears in 2/2 methods
-  3+2(MLP)                       appears in 2/2 methods
-  1+1(GPR)                       appears in 2/2 methods
   1+1(kNN)                       appears in 2/2 methods
-  8+2(kNN)                       appears in 2/2 methods
-  1+1(MLP)                       appears in 2/2 methods
   3+2(kNN)                       appears in 2/2 methods
+  8+2(kNN)                       appears in 2/2 methods
+  1+1(GPR)                       appears in 2/2 methods
+  3+2(MLP)                       appears in 2/2 methods
+  8+2(MLP)                       appears in 2/2 methods
+  1+1(MLP)                       appears in 2/2 methods

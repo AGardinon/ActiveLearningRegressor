@@ -130,7 +130,7 @@ File: `activereg/experiment.py`.
   `AcquisitionFunction.__init__` (`acquisition.py:103-108`) for now.
   It still works and removing it is a separate cleanup.
 
-### P1.8 — Decide `landscape_sanity_check` policy `[ ]`
+### P1.8 — Decide `landscape_sanity_check` policy `[x]`
 
 File: `activereg/acquisition.py`.
 

@@ -368,6 +368,11 @@ def maximum_predicted_value(mu: np.ndarray) -> np.ndarray:
 def landscape_sanity_check(landscape: np.ndarray) -> np.ndarray:
     """Check and adjust the shape of the acquisition landscape.
 
+    Enforces that the landscape reaching the batch selector is always 1-D.
+    Multi-property scalarization must happen *before* this check inside
+    ``landscape_acquisition``; by the time the landscape exits that method it
+    must already be 1-D.
+
     Args:
         landscape (np.ndarray): Input landscape array.
     Returns:

@@ -12,22 +12,23 @@ a work session starts or ends, even if nothing got finished.
 
 ## Current status
 
-**Phase:** Planning complete. Implementation not yet started.
+**Phase:** Phase 1 in progress — P1.1 and P1.2 done; P1.3 is next.
 
 **What has been done so far:**
 
 - All architectural decisions (D1–D12) are recorded in `DESIGN.md`.
 - The phased plan is recorded in `PHASES.md` with step-level granularity.
-- No source files under `activereg/` have been modified yet.
-- No new files under `activereg/` or `scripts/` have been created yet.
-- The only files added on this branch are under `docs/multi_property/`.
+- `activereg/mlmodel/_multi_property.py` created with `MultiPropertyMLModel`
+  protocol, `IndependentMultiPropertyModel` class, and `wrap_single_property`
+  adapter. Shape contracts verified by smoke test.
+- `activereg/mlmodel/__init__.py` updated to re-export the three new symbols.
 
 **Next concrete action when work resumes:**
 
-Start Phase 1, step **P1.1** — create `activereg/mlmodel/_multi_property.py`
-with the `MultiPropertyMLModel` protocol, `IndependentMultiPropertyModel`
-class, and `wrap_single_property` adapter. See `PHASES.md` §P1.1 and
-`DESIGN.md` §4.1 for the exact interface contract.
+**P1.3** — Refactor `setup_experiment_variables` in `activereg/experiment.py`
+to parse `target_variables` as the authoritative list and document that it is
+guaranteed non-empty. Then continue with P1.4 (`setup_multi_property_ml_model`
+factory).
 
 ---
 
@@ -119,6 +120,17 @@ re-verified against the current codebase in a single session. Worth a
   sampling_block skeleton and `STATE.md` assumption list to reflect
   the real codebase. No source files under `activereg/` or `scripts/`
   have been modified yet.
+- **2026-04-22** — Implementation started. Verified all STATE.md §3
+  assumptions before writing code:
+  - Numbered-suffix handling at `acquisition.py:103-108` confirmed intact.
+  - Stale TODO is at `experiment.py:334` (STATE.md had 341 — 7-line shift,
+    minor; same comment text, still unfixed, P1.6 will address it).
+  - `.ravel()` and `[0]` patterns confirmed at the expected locations
+    (`benchmark_functions.py:599` vs 598 — 1-line shift only).
+  - `AnchoredEnsembleMLP.predict()` at `_mlp.py:80-91` confirmed:
+    squeezes to `(N,)` only when `out_feats == 1`.
+  - Completed **P1.1** (`_multi_property.py`) and **P1.2** (`__init__.py`
+    re-exports). Shape contracts verified by smoke test.
 
 ---
 

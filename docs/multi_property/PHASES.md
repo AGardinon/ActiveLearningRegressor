@@ -24,7 +24,7 @@ existing single-property configs still run end-to-end unchanged.
 Phase 1 is purely plumbing. It should be reviewable as a refactoring PR
 that enables future work.
 
-### P1.1 — Create `activereg/mlmodel/_multi_property.py` `[ ]`
+### P1.1 — Create `activereg/mlmodel/_multi_property.py` `[x]`
 
 - Define `MultiPropertyMLModel` as a `Protocol` (or ABC) with:
   - `target_names: list[str]`
@@ -44,7 +44,7 @@ that enables future work.
   with a single target. Used by single-property driver scripts to keep
   `sampling_block` uniform.
 
-### P1.2 — Update `activereg/mlmodel/__init__.py` `[ ]`
+### P1.2 — Update `activereg/mlmodel/__init__.py` `[x]`
 
 Re-export `MultiPropertyMLModel`, `IndependentMultiPropertyModel`,
 `wrap_single_property`. Do not touch existing re-exports.

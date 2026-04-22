@@ -49,7 +49,7 @@ that enables future work.
 Re-export `MultiPropertyMLModel`, `IndependentMultiPropertyModel`,
 `wrap_single_property`. Do not touch existing re-exports.
 
-### P1.3 — Refactor `setup_experiment_variables` `[ ]`
+### P1.3 — Refactor `setup_experiment_variables` `[x]`
 
 File: `activereg/experiment.py`.
 
@@ -59,7 +59,7 @@ File: `activereg/experiment.py`.
 - No functional change to the return tuple for now; document that
   `target_vars` is now guaranteed to be a non-empty list.
 
-### P1.4 — Add `setup_multi_property_ml_model` factory `[ ]`
+### P1.4 — Add `setup_multi_property_ml_model` factory `[x]`
 
 File: `activereg/experiment.py`.
 

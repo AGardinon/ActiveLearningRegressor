@@ -80,7 +80,9 @@ def remove_evidence_from_gt(gt: pd.DataFrame, evidence: pd.DataFrame, search_var
     return candidates_df
 
 
-def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, str, list[dict]]:
+def setup_experiment_variables(
+    config: dict,
+) -> tuple[str, str, int, int, str, list[str], list[str]]:
     """Sets up the experiment parameters from the config dictionary.
     The configuration dictionary must contain the following keys:
     - experiment_name (str): Name of the experiment.
@@ -88,14 +90,17 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
     - n_cycles (int): Number of active learning cycles.
     - init_batch_size (int): Initial batch size.
     - init_sampling (str): Initial sampling method.
-    - acquisition_parameters (list[dict]): Acquisition function parameters.
+    - search_space_variables (list[str]): Feature column names.
+    - target_variables (list[str]): Target property names. Guaranteed non-empty.
 
     Args:
         config (dict): Configuration dictionary containing experiment parameters.
 
     Returns:
-        tuple: Contains experiment name, additional notes, number of cycles, initial batch size,
-               initial sampling method, cycle sampling method, and acquisition parameters.
+        tuple: (experiment_name, additional_notes, n_cycles, init_batch_size,
+                init_sampling, search_space_variables, target_variables).
+               ``target_variables`` is always a non-empty list[str] — it is the
+               authoritative list of target property names for the experiment.
     """
     exp_name = config.get('experiment_name', None)
     additional_notes = config.get('experiment_notes', '')
@@ -107,12 +112,14 @@ def setup_experiment_variables(config: dict) -> tuple[str, str, int, int, str, s
     assert len(search_space_vars) > 0, "Search space variables must be defined in the config file."
 
     target_vars = config.get('target_variables', None)
-    assert target_vars is not None, "Target variables must be defined in the config file."
+    assert isinstance(target_vars, list) and len(target_vars) > 0, (
+        "target_variables must be a non-empty list in the config file."
+    )
 
-    return (exp_name, 
-            additional_notes, 
-            n_cycles, 
-            init_batch, 
+    return (exp_name,
+            additional_notes,
+            n_cycles,
+            init_batch,
             init_sampling,
             search_space_vars,
             target_vars)
@@ -138,6 +145,85 @@ def setup_ml_model(ml_model_type: str, ml_model_params: dict) -> regmodels.MLMod
         return create_bnn_instance(ml_model_params)
     else:
         raise ValueError(f"Unknown ML model type: {ml_model_type}. Supported types are: ['GPR', 'AnchoredEnsembleMLP', 'kNNRegressorAL', 'BayesianNN'].")
+
+
+def setup_multi_property_ml_model(
+    config: dict,
+    target_names: list[str],
+) -> regmodels.IndependentMultiPropertyModel:
+    """Build a MultiPropertyMLModel from a model config dict and a list of target names.
+
+    Supports two config layouts (D6):
+
+    **Global spec** — ``config["ml_model"]`` is a string; the same model type
+    and ``config["model_parameters"]`` apply to every target. One independent
+    model instance is created per target::
+
+        ml_model: "GPR"
+        model_parameters:
+          kernel: "MATERN_W"
+          ...
+
+    **Per-property spec** — ``config["ml_model"]`` is a dict keyed by target
+    name; ``config["model_parameters"]`` is also a dict keyed by target name::
+
+        ml_model:
+          y1: "GPR"
+          y2: "AnchoredEnsembleMLP"
+        model_parameters:
+          y1: {kernel: "MATERN_W", ...}
+          y2: {n_models: 10, ...}
+
+    For single-property experiments, the global-spec path produces an
+    ``IndependentMultiPropertyModel`` with a single entry, which is the
+    canonical multi-property interface even for single-target runs.
+
+    Args:
+        config (dict): Model configuration dict (typically loaded from a
+            ``*_config.yaml`` file).
+        target_names (list[str]): Ordered list of target property names.
+            Must be non-empty.
+
+    Returns:
+        IndependentMultiPropertyModel: Wrapped collection of single-output
+            models, one per target property.
+    """
+    ml_model_spec = config["ml_model"]
+    model_params = config.get("model_parameters", {})
+
+    if isinstance(ml_model_spec, str):
+        # Global spec: same type and parameters for every target.
+        models = {
+            name: setup_ml_model(ml_model_spec, model_params)
+            for name in target_names
+        }
+    elif isinstance(ml_model_spec, dict):
+        # Per-property spec: each target may have a different model type/params.
+        missing = [n for n in target_names if n not in ml_model_spec]
+        if missing:
+            raise ValueError(
+                f"Per-property ml_model spec is missing entries for: {missing}. "
+                f"Keys present: {list(ml_model_spec.keys())}"
+            )
+        if not isinstance(model_params, dict) or any(
+            n not in model_params for n in target_names
+        ):
+            missing_p = [n for n in target_names if n not in model_params]
+            raise ValueError(
+                f"Per-property model_parameters must be a dict keyed by target name. "
+                f"Missing entries for: {missing_p}"
+            )
+        models = {
+            name: setup_ml_model(ml_model_spec[name], model_params[name])
+            for name in target_names
+        }
+    else:
+        raise ValueError(
+            f"config['ml_model'] must be a string (global spec) or a dict "
+            f"(per-property spec), got {type(ml_model_spec).__name__}."
+        )
+
+    return regmodels.IndependentMultiPropertyModel(models)
 
 
 def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:

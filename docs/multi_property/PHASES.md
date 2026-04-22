@@ -81,7 +81,7 @@ File: `activereg/experiment.py`.
   identically to the old single-property path upstream, modulo the
   wrapper.
 
-### P1.5 — Update `AcquisitionFunction.landscape_acquisition` `[ ]`
+### P1.5 — Update `AcquisitionFunction.landscape_acquisition` `[x]`
 
 File: `activereg/acquisition.py`.
 

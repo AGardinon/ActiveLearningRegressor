@@ -319,10 +319,10 @@ def create_bnn_instance(model_parameters: dict) -> regmodels.MLModel:
 
 
 def sampling_block(
-        X_candidates: np.ndarray, 
+        X_candidates: np.ndarray,
         X_train: np.ndarray,
-        y_train: np.ndarray,
-        ml_model: regmodels.MLModel, 
+        Y_train: np.ndarray,
+        ml_model: regmodels.IndependentMultiPropertyModel,
         acquisition_params: list[dict],
         batch_selection_method: str,
         batch_selection_params: dict,
@@ -331,94 +331,132 @@ def sampling_block(
     """Samples new points from the landscape of the acquisition function.
 
     Args:
-        X_candidates (np.ndarray): candidates points for the cycle.
-        X_train (np.ndarray): training points from the cycle.
-        y_train (np.ndarray): training target values from the cycle.
-        ml_model (regmodels.MLModel): machine learning model used for the experiment.
-        acquisition_params (list[dict]): acquisition function parameters for the cycle.
-        batch_selection_method (str): batch selection strategy to use (highest_landscape | constant_liar | kriging_believer | local_penalization).
-        batch_selection_params (dict): parameters for the batch selection strategy (see documentation for details).
-        penalization_params (tuple[float, float], optional): penalization parameters for the landscape. Defaults to (0.25, 1.0).
+        X_candidates (np.ndarray): Candidate points, shape (M, d).
+        X_train (np.ndarray): Training inputs, shape (N, d).
+        Y_train (np.ndarray): Training targets, shape (N, P). Single-property
+            callers should pass a 2-D array of shape (N, 1).
+        ml_model (IndependentMultiPropertyModel): Trained multi-property model.
+            Single-property callers should wrap their model with
+            ``wrap_single_property`` before calling.
+        acquisition_params (list[dict]): Acquisition function parameters for the
+            cycle. Each entry must contain ``acquisition_mode``, ``n_points``,
+            and (for Phase 1) ``target_variable`` naming the property to optimise.
+        batch_selection_method (str): Batch selection strategy
+            (highest_landscape | constant_liar | kriging_believer |
+            local_penalization). Only ``highest_landscape`` is tested with
+            multi-property models; the others are single-property legacy paths.
+        batch_selection_params (dict): Parameters for the batch selection strategy.
+        penalization_params (tuple[float, float], optional): (radius, strength)
+            for soft landscape penalization. Defaults to (0.25, 1.0).
 
     Returns:
-        tuple[list[int], np.ndarray]: new sampled indexes and the landscapes of the acquisition function.
+        tuple[list[int], np.ndarray]: Selected indices into ``X_candidates`` and
+            a landscape array of shape (n_entries, M) padded to full pool size.
     """
+    M = len(X_candidates)
 
-    # init variables
-    y_best = np.max(y_train)
-    X_candidates_indexes = np.arange(0,len(X_candidates))
+    # Y_train must be 2-D: (N, P)
+    if Y_train.ndim == 1:
+        Y_train = Y_train.reshape(-1, 1)
+
     X_train_copy = X_train.copy()
-    y_train_copy = y_train.copy()
 
-    sampled_new_idx = []
-    landscape_list = []
+    # candidate_mask: True = available for selection; implements sequential-with-removal (D11).
+    candidate_mask = np.ones(M, dtype=bool)
 
-    # loop over acquisition function types
+    sampled_new_idx: list[int] = []
+    landscape_list: list[np.ndarray] = []
+
     for acp in acquisition_params:
         acqui_param = acp.copy()
-        n_points_per_style = acqui_param['n_points']
+        n_points_per_style = acqui_param.pop('n_points')
+        # target_variable is intentionally NOT popped: it flows into AcquisitionFunction.__init__
+        # so that internal callers (e.g. batch_highest_landscape) also use the per-property branch.
+        target_variable = acqui_param.get('target_variable', None)
 
-        # if acquisition mode is "random", sample random points and continue
+        # Sub-pool of candidates not yet selected by earlier entries.
+        idx_map = np.flatnonzero(candidate_mask)   # sub-pool → full-pool index
+        X_sub = X_candidates[candidate_mask]
+
+        # Per-property y_best for EI-style acquisition functions.
+        if target_variable is not None:
+            prop_idx = ml_model.target_names.index(target_variable)
+        else:
+            prop_idx = 0  # fallback; joint entries handled in Phase 2
+        y_best = float(np.max(Y_train[:, prop_idx]))
+        y_train_1d = Y_train[:, prop_idx]          # 1-D slice for batch strategies
+
+        # --- random fast-path ---
         if acqui_param['acquisition_mode'] == 'random':
-            random_ndx = np.random.choice(
-                X_candidates_indexes, 
-                size=n_points_per_style, 
-                replace=False
+            random_sub_ndx = np.random.choice(
+                len(X_sub), size=n_points_per_style, replace=False
             )
-            sampled_new_idx += list(random_ndx)
-            landscape_list.append(np.zeros(len(X_candidates)))  # append a zero landscape for consistency
-            X_train_copy = np.concatenate([X_train_copy, X_candidates[random_ndx]])
+            full_ndx = idx_map[random_sub_ndx]
+            sampled_new_idx += list(full_ndx)
+            landscape_list.append(np.zeros(M))
+            candidate_mask[full_ndx] = False
+            X_train_copy = np.concatenate([X_train_copy, X_candidates[full_ndx]])
             continue
 
-        # assert that if the acquisition mode is mpv the number of points is 1
+        # --- maximum_predicted_value fast-path guard ---
         if acqui_param['acquisition_mode'] == 'maximum_predicted_value':
-            assert n_points_per_style == 1, "Number of points must be 1 when using maximum_predicted_value acquisition mode."
+            assert n_points_per_style == 1, (
+                "Number of points must be 1 when using maximum_predicted_value acquisition mode."
+            )
 
         acqui_func = AcquisitionFunction(y_best=y_best, **acqui_param)
-        # Compute pure landscape for possible output/analysis (batch methods can modify it)
-        landscape = acqui_func.landscape_acquisition(X_candidates=X_candidates, ml_model=ml_model)
-        landscape = landscape_sanity_check(landscape)
 
-        # skip if acquisition mode is maximum_predicted_value
+        # Compute landscape over the current sub-pool.
+        # target_variable is already stored on acqui_func; no need to pass explicitly.
+        landscape_sub = acqui_func.landscape_acquisition(
+            X_candidates=X_sub,
+            ml_model=ml_model,
+        )
+        landscape_sub = landscape_sanity_check(landscape_sub)
+
+        # Pad to full pool size (unselected entries stay 0).
+        landscape_full = np.zeros(M)
+        landscape_full[candidate_mask] = landscape_sub
+        landscape_list.append(landscape_full)
+
+        # --- maximum_predicted_value fast-path ---
         if acqui_func.acquisition_mode == 'maximum_predicted_value':
-            acq_mpv_ndx = np.argmax(landscape)
-            sampled_new_idx += [X_candidates_indexes[acq_mpv_ndx]]
-            landscape_list.append(landscape)
-            X_train_copy = np.concatenate([X_train_copy, X_candidates[[acq_mpv_ndx]]])
+            acq_mpv_sub_ndx = np.argmax(landscape_sub)
+            full_ndx = idx_map[acq_mpv_sub_ndx]
+            sampled_new_idx += [int(full_ndx)]
+            candidate_mask[full_ndx] = False
+            X_train_copy = np.concatenate([X_train_copy, X_candidates[[full_ndx]]])
             continue
 
-        # Append the landscape for analysis
-        landscape_list.append(landscape)
-
-        # Generic penalization of the landscape to add soft avoidance of sampled points
-        # Generally can be skipped for batch methods that have their own penalization
+        # Generic penalization of the sub-pool landscape.
         if penalization_params:
             radius, strength = penalization_params
-            landscape = penalize_landscape_fast(
-                landscape=landscape,
-                X_candidates=X_candidates,
+            landscape_sub = penalize_landscape_fast(
+                landscape=landscape_sub,
+                X_candidates=X_sub,
                 X_train=X_train_copy,
                 radius=radius, strength=strength,
             )
 
-        # Batch selection strategy
+        # Batch selection over the sub-pool.
         batch_selector = BatchSelectionStrategy(
             strategy_mode=batch_selection_method,
             strategy_params=batch_selection_params
         )
-        sampled_idx_tmp = batch_selector.batch_acquire(
-            X_candidates=X_candidates,
+        sampled_sub_idx = batch_selector.batch_acquire(
+            X_candidates=X_sub,
             model=ml_model,
             acquisition_function=acqui_func,
             batch_size=n_points_per_style,
             X_train=X_train_copy,
-            y_train=y_train_copy,
+            y_train=y_train_1d,
         )
 
-        # Stack the sampled indexes and update the training set copy for multiple acquisition loop
-        sampled_new_idx += list(sampled_idx_tmp)
-        # TODO: check if I need to concatenate and update the X_train
-        # X_train_copy = np.concatenate([X_train_copy, X_candidates[sampled_new_idx]])
+        # Map sub-pool indices back to full-pool and remove from future entries.
+        full_idx = idx_map[sampled_sub_idx]
+        sampled_new_idx += list(full_idx)
+        candidate_mask[full_idx] = False
+        X_train_copy = np.concatenate([X_train_copy, X_candidates[full_idx]])
 
     return sampled_new_idx, np.vstack(landscape_list)
 

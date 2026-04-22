@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.stats import norm
 from scipy.spatial import cKDTree
-from activereg.mlmodel import MLModel
+from activereg.mlmodel import MLModel, MultiPropertyMLModel
 from activereg.sampling import sample_landscape
 
 # --------------------------------------------------------------
@@ -114,6 +114,10 @@ class AcquisitionFunction:
         self.dist = kwargs.get('dist', None)
         self.epsilon = kwargs.get('epsilon', None)
         self.tei_percentage = kwargs.get('percentage', None)
+        # multi-property dispatch (stored so internal callers like batch_highest_landscape
+        # that call landscape_acquisition without explicit target args still work)
+        self.target_variable = kwargs.get('target_variable', None)
+        self.target_variables = kwargs.get('target_variables', None)
         # assertions
         if self.acquisition_mode == 'expected_improvement':
             assert self.xi >= 0, "`xi` must be non-negative."
@@ -123,38 +127,81 @@ class AcquisitionFunction:
             assert self.tei_percentage is not None, "`percentage` must be provided for percentage_target_expected_improvement."
 
 
-    def landscape_acquisition(self, X_candidates: np.ndarray, ml_model: MLModel) -> np.ndarray:
-        """Generate an acquisition landscape for the given candidate points.
-        The methods assume one of the activereg.mlmodel is used, where the predict statement
-        automatically returns mean and standard dev.
+    def landscape_acquisition(
+        self,
+        X_candidates: np.ndarray,
+        ml_model: MLModel | MultiPropertyMLModel,
+        target_variable: str | None = None,
+        target_variables: list[str] | None = None,
+        weights: np.ndarray | None = None,
+        scalarization: str = "augmented_chebyshev",
+        y_stats: dict | None = None,
+    ) -> np.ndarray:
+        """Generate a 1-D acquisition landscape over the candidate points.
+
+        The ``target_variable`` / ``target_variables`` parameters select the
+        multi-property dispatch branch:
+
+        - ``target_variable`` (str): per-property branch — calls
+          ``ml_model.predict_property(X_candidates, target_variable)`` and
+          applies the single-property formula.  Requires a
+          ``MultiPropertyMLModel``.
+        - ``target_variables`` (list[str]): joint branch — scalarizes across
+          multiple properties.  **Not implemented in Phase 1; raises
+          NotImplementedError.**
+        - both ``None``: legacy path — calls ``ml_model.predict(X_candidates)``
+          directly, expects 1-D ``mu`` / ``sigma`` (backwards compatible with
+          single-property ``MLModel`` callers).
 
         Args:
             X_candidates (np.ndarray): Candidate points for evaluation.
-            ml_model (MLModel): Machine learning model for predictions (trained).
-
-        Raises:
-            ValueError: If the acquisition mode is not supported.
+            ml_model: Trained ML model — either a single-property ``MLModel``
+                or a ``MultiPropertyMLModel``.
+            target_variable (str | None): Name of a single property to evaluate.
+            target_variables (list[str] | None): Names of properties for joint
+                scalarized acquisition (Phase 2).
+            weights (np.ndarray | None): Per-property weights for scalarization
+                (Phase 2).
+            scalarization (str): Scalarization method — reserved for Phase 2.
+            y_stats (dict | None): Per-property (y_min, y_max) stats for
+                normalization (Phase 2).
 
         Returns:
-            np.ndarray: Acquisition landscape.
+            np.ndarray: 1-D acquisition landscape of length ``len(X_candidates)``.
         """
-        _, mu, sigma = ml_model.predict(X_candidates)
+        # Resolve effective targets: explicit args take precedence over stored instance attrs.
+        effective_target_variables = target_variables if target_variables is not None else self.target_variables
+        effective_target_variable = target_variable if target_variable is not None else self.target_variable
+
+        if effective_target_variables is not None:
+            raise NotImplementedError(
+                "Joint multi-property acquisition (target_variables) is not "
+                "implemented in Phase 1. It will be added in Phase 2 "
+                "(see docs/multi_property/PHASES.md §P2.3)."
+            )
+
+        if effective_target_variable is not None:
+            # Per-property branch: delegate predict to the named property.
+            _, mu, sigma = ml_model.predict_property(X_candidates, effective_target_variable)
+        else:
+            # Legacy path: single-property MLModel, mu/sigma are 1-D.
+            _, mu, sigma = ml_model.predict(X_candidates)
 
         if self.acquisition_mode == 'upper_confidence_bound':
             return upper_confidence_bound(mu=mu, sigma=sigma, kappa=self.kappa)
-        
+
         elif self.acquisition_mode == 'uncertainty_landscape':
             return uncertainty_landscape(sigma=sigma)
 
         elif self.acquisition_mode == 'expected_improvement':
             return expected_improvement(mu=mu, sigma=sigma, y_best=self.y_best, xi=self.xi)
-        
+
         elif self.acquisition_mode == 'target_expected_improvement':
             return target_expected_improvement(mu=mu, sigma=sigma, y_target=self.y_target, dist=self.dist, epsilon=self.epsilon)
-        
+
         elif self.acquisition_mode == 'percentage_target_expected_improvement':
             return percentage_target_expected_improvement(mu=mu, sigma=sigma, y_best=self.y_best, percentage=self.tei_percentage)
-        
+
         elif self.acquisition_mode == 'exploration_mutual_info':
             try:
                 noise_var = ml_model.model.kernel_.k2.noise_level

@@ -545,6 +545,19 @@ class AcquisitionParametersGenerator:
         # assert that acquisition_params is provided and not empty
         assert acquisition_params and len(acquisition_params) > 0, "Acquisition parameters must be provided and not empty."
 
+    @staticmethod
+    def _entry_identifier(entry: dict) -> str:
+        """Return the identifier for an acquisition entry.
+
+        If the entry has an explicit ``name`` field, that is used; otherwise
+        the ``acquisition_mode`` string is used as a fallback.  This allows
+        protocol stages to reference entries by a human-readable ``name``
+        (supporting multi-property configs with multiple entries of the same
+        acquisition mode) while remaining backwards compatible with existing
+        configs that have no ``name`` field.
+        """
+        return entry.get('name') or entry['acquisition_mode']
+
     def _protocol_params_for_cycle(self, cycle: int) -> dict:
         """Get acquisition parameters for a specific cycle, indipendently of the state of the class.
         Each stage last for a number of cycles stated in the `cycles` key:
@@ -564,24 +577,25 @@ class AcquisitionParametersGenerator:
             n_points = self.acquisition_protocol[stage]['n_points']
             modes = self.acquisition_protocol[stage]['acquisition_modes']
 
-            #TODO allow for additional parameters specific for all acquisition modes
-
             # assert that the n_points list is the same length as the acquisition modes list
             assert len(modes) == len(n_points), \
                 f"Number of acquisition modes {len(modes)} does not match number of n_points {len(n_points)} in stage {stage} (starting count: {self.cycle_start_count})."
-            
-            # update the acquisition_params with the n_points for the current stage
+
+            # update the acquisition_params with the n_points for the current stage,
+            # matching by identifier (name or acquisition_mode fallback).
             for i, mode in enumerate(modes):
                 for acq in self.acquisition_params:
-                    if acq['acquisition_mode'] == mode:
+                    if self._entry_identifier(acq) == mode:
                         acq['n_points'] = n_points[i]
 
             if cycle < cycle_count + n_cycles:
                 modes = self.acquisition_protocol[stage]['acquisition_modes']
-                acq_params_for_cycle = [acq for acq in self.acquisition_params if acq['acquisition_mode'] in modes]
-
+                acq_params_for_cycle = [
+                    acq for acq in self.acquisition_params
+                    if self._entry_identifier(acq) in modes
+                ]
                 return acq_params_for_cycle
-            
+
             cycle_count += n_cycles
 
         return []

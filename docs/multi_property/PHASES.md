@@ -97,7 +97,7 @@ File: `activereg/acquisition.py`.
   the wrapper.
 - Existing single-property formulas stay untouched.
 
-### P1.6 — Refactor `sampling_block` `[ ]`
+### P1.6 — Refactor `sampling_block` `[x]`
 
 File: `activereg/experiment.py`.
 
@@ -116,7 +116,7 @@ File: `activereg/experiment.py`.
 - Preserve the `random` and `maximum_predicted_value` fast-paths but
   route them through the same candidate_mask mechanism.
 
-### P1.7 — Update `AcquisitionParametersGenerator` for named entries `[ ]`
+### P1.7 — Update `AcquisitionParametersGenerator` for named entries `[x]`
 
 File: `activereg/experiment.py`.
 

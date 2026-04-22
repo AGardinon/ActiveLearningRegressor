@@ -40,10 +40,11 @@ from activereg.utils import create_strict_folder
 from activereg.adaptiveRefinement import (select_centers_from_batch,
                                           pointwise_hypercube_refinement,
                                           filter_refined_additions)
-from activereg.experiment import (get_gt_dataframes, 
-                                  sampling_block, 
+from activereg.experiment import (get_gt_dataframes,
+                                  sampling_block,
                                   setup_data_pool,
                                   setup_ml_model,
+                                  setup_multi_property_ml_model,
                                   remove_evidence_from_gt,
                                   setup_experiment_variables,
                                   AcquisitionParametersGenerator)
@@ -373,9 +374,9 @@ if __name__ == '__main__':
     # train dataset -> pool_df : from which the candidates will be sampled and refined during the experiment
     # gt dataset -> val_df : used as holdout validation set for metrics computation during the experiment
 
-    # Extract the target landscapes for metrics computation
-    pool_target_landscape = pool_df[TARGET_VAR].to_numpy().ravel()
-    val_target_landscape = val_df[TARGET_VAR].to_numpy().ravel()
+    # Extract the target landscapes for metrics computation — shape (N, P)
+    pool_target_landscape = pool_df[TARGET_VAR].to_numpy()
+    val_target_landscape = val_df[TARGET_VAR].to_numpy()
 
     # Set up and apply the data scaler on the complete search space
     data_scaler_type = benchmark_config.get('data_scaler', None)
@@ -457,7 +458,7 @@ if __name__ == '__main__':
 
         # --------------------------------------------------------------------------------
         # SET UP THE MODEL (params from the config file)
-        ML_MODEL = setup_ml_model(ml_model_type=ml_model_type, ml_model_params=ml_model_params)
+        ML_MODEL = setup_multi_property_ml_model(model_config, TARGET_VAR)
         # --------------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------------
@@ -479,7 +480,7 @@ if __name__ == '__main__':
 
         if evidence_df is not None:
             X_train = data_scaler.transform(evidence_df[SEARCH_VAR].to_numpy())
-            y_train = evidence_df[TARGET_VAR].to_numpy()
+            Y_train = evidence_df[TARGET_VAR].to_numpy().reshape(-1, len(TARGET_VAR))
 
         elif evidence_df is None:
             screened_indexes = sample_landscape(
@@ -488,18 +489,18 @@ if __name__ == '__main__':
                 sampling_mode=INIT_SAMPLING
             )
             X_train = X_candidates[screened_indexes]
-            y_train = y_candidates[screened_indexes]
+            Y_train = y_candidates[screened_indexes].reshape(-1, len(TARGET_VAR))
 
             X_candidates = np.delete(X_candidates, screened_indexes, axis=0)
             y_candidates = np.delete(y_candidates, screened_indexes, axis=0)
-        
+
         for i in range(len(X_train)):
             train_points_data.append({
-                **{col : X_train[i,j] for j,col in enumerate(SEARCH_VAR)},
+                **{col: X_train[i, j] for j, col in enumerate(SEARCH_VAR)},
                 "cycle": 0,
                 "repetition": rep+1,
                 "acquisition_source": INIT_SAMPLING if evidence_df is None else "evidence",
-                "y_value": y_train[i][0]
+                **{name: float(Y_train[i, j]) for j, name in enumerate(TARGET_VAR)},
             })
 
         # !!! Careful
@@ -515,14 +516,15 @@ if __name__ == '__main__':
             # Grid search step (every N acquired points as defined in the config file)
             if perform_grid_search is True and n_points_acquired >= next_grid_search_target:
                 grid_search_counter += 1
-                # Create a factory function with the fixed params for the base model class
-                base_model_factory = partial(ML_MODEL.__class__, **fixed_model_params)
-                # Perform grid search cross-validation and get the best hyperparameters
+                # Use the first underlying model's class for grid search (global spec only).
+                _first_underlying = list(ML_MODEL._models.values())[0]
+                base_model_factory = partial(_first_underlying.__class__, **fixed_model_params)
+                # Perform grid search cross-validation on the first target property.
                 gridsearch_result = grid_search_cv(
                     model_factory=base_model_factory,
                     param_grid=param_grid,
                     X=X_train,
-                    y=y_train,
+                    y=Y_train[:, 0],
                     scoring='neg_mean_squared_error',
                     verbose=1
                 )
@@ -537,8 +539,11 @@ if __name__ == '__main__':
 
                 best_params = gridsearch_result['best_params']
                 merge_best_params = merge_model_params(config_params=ml_model_params, best_params=best_params)
-                # Update the ML_MODEL with the new best hyperparameters found
-                ML_MODEL = setup_ml_model(ml_model_type=ml_model_type, ml_model_params=merge_best_params)
+                # Rebuild the multi-property model with the updated hyperparameters.
+                ML_MODEL = setup_multi_property_ml_model(
+                    {**model_config, 'model_parameters': merge_best_params},
+                    TARGET_VAR
+                )
 
                 next_grid_search_target += gridsearch_every_n_points
             # ----------------------------------------------------------------------------
@@ -550,18 +555,17 @@ if __name__ == '__main__':
             for acp in cycle_acqui_params:
                 predefined_acquisition_modes.extend([acp['acquisition_mode']] * acp['n_points'])
 
-            # Compute the best screened value and train the model
-            y_best = np.max(y_train)
-            ML_MODEL.train(X_train, y_train)
+            # Train the model on current training set
+            ML_MODEL.train(X_train, Y_train)
 
-            _, y_pred_pool, y_unc_pool = ML_MODEL.predict(X_pool)
-            _, y_pred_val, y_unc_val = ML_MODEL.predict(X_val)
+            _, y_pred_pool, y_unc_pool = ML_MODEL.predict(X_pool)  # each (N_pool, P)
+            _, y_pred_val, y_unc_val = ML_MODEL.predict(X_val)      # each (N_val, P)
 
             # Sample from the candidates
             sampled_indexes, landscape = sampling_block(
                 X_candidates=X_candidates,
                 X_train=X_train,
-                y_train=y_train,
+                Y_train=Y_train,
                 ml_model=ML_MODEL,
                 acquisition_params=cycle_acqui_params,
                 batch_selection_method=batch_selection_method,
@@ -573,30 +577,34 @@ if __name__ == '__main__':
             cycle_data_dict = {
                 "repetition": rep+1,
                 "cycle": cycle+1,
-                "y_best_screened": y_best,
+                **{f"y_best_{name}": float(np.max(Y_train[:, j])) for j, name in enumerate(TARGET_VAR)},
             }
-            cycle_metrics_dict = evaluate_cycle_metrics(
-                y_true_pool=pool_target_landscape,
-                y_pred_pool=y_pred_pool,
-                y_true_val=val_target_landscape,
-                y_pred_val=y_pred_val,
-                y_uncertainty_val=y_unc_val
-            )
+            cycle_metrics_dict = {}
+            for j, name in enumerate(TARGET_VAR):
+                prop_metrics = evaluate_cycle_metrics(
+                    y_true_pool=pool_target_landscape[:, j],
+                    y_pred_pool=y_pred_pool[:, j],
+                    y_true_val=val_target_landscape[:, j],
+                    y_pred_val=y_pred_val[:, j],
+                    y_uncertainty_val=y_unc_val[:, j]
+                )
+                cycle_metrics_dict.update({f"{k}_{name}": v for k, v in prop_metrics.items()})
             cycle_data_dict.update(cycle_metrics_dict)
             benchmark_data.append(cycle_data_dict)
 
             # Update the train and candidates sets
             X_train = np.vstack((X_train, X_candidates[sampled_indexes]))
-            y_train = np.concatenate((y_train, y_candidates[sampled_indexes]))
+            Y_train = np.concatenate((Y_train, y_candidates[sampled_indexes].reshape(-1, len(TARGET_VAR))))
 
             # Update training points tracking
+            sampled_Y = y_candidates[sampled_indexes].reshape(-1, len(TARGET_VAR))
             for i in range(len(X_candidates[sampled_indexes])):
                 train_points_data.append({
-                    **{col : X_candidates[sampled_indexes][i,j] for j,col in enumerate(SEARCH_VAR)},
+                    **{col: X_candidates[sampled_indexes][i, j] for j, col in enumerate(SEARCH_VAR)},
                     "cycle": cycle+1,
                     "repetition": rep+1,
                     "acquisition_source": predefined_acquisition_modes[i],
-                    "y_value": y_candidates[sampled_indexes][i][0]
+                    **{name: float(sampled_Y[i, j]) for j, name in enumerate(TARGET_VAR)},
                 })
 
             X_candidates = np.delete(X_candidates, sampled_indexes, axis=0)
@@ -661,9 +669,11 @@ if __name__ == '__main__':
                     y_candidates = np.concatenate((y_candidates, y_refined_filtered))
 
                     # Append the refined and filtered points to the pool set
-                    # Careful: the target from the pool (and validation) set are (Npoints, ) shaped arrays
                     X_pool = np.vstack((X_pool, X_pool_refined_filtered))
-                    pool_target_landscape = np.concatenate((pool_target_landscape, y_refined_filtered.ravel()))
+                    pool_target_landscape = np.vstack((
+                        pool_target_landscape,
+                        y_refined_filtered.reshape(-1, len(TARGET_VAR))
+                    ))
 
                     # Update the next refinement target
                     print(f"-> Adaptive refinement step {refine_counter} at {n_points_acquired} points acquired, "
@@ -690,7 +700,7 @@ if __name__ == '__main__':
         if refine_generator is not None:
             # Reset the pool set; the candidates set is derived from the candidates_df so it is not affected by the refinement
             X_pool = data_scaler.transform(pool_df[SEARCH_VAR].to_numpy())
-            pool_target_landscape = pool_df[TARGET_VAR].to_numpy().ravel()
+            pool_target_landscape = pool_df[TARGET_VAR].to_numpy()
 
         # Save the model at the end of the repetition
         model_save_path = BENCHMARK_PATH / f'ml_model_rep{rep+1}.joblib'

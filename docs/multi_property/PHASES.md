@@ -139,7 +139,7 @@ File: `activereg/acquisition.py`.
   the batch selector is 1D.
 - Add a docstring note explaining the guarantee.
 
-### P1.9 — Update `scripts/benchmark_functions.py` `[ ]`
+### P1.9 — Update `scripts/benchmark_functions.py` `[x]`
 
 This is the **main production benchmark script**. It takes 4 configs via
 CLI (`-bc` benchmark, `-mc` model, `-acqmodes` acquisition,
@@ -173,7 +173,7 @@ CLI (`-bc` benchmark, `-mc` model, `-acqmodes` acquisition,
 - No change to the dataframe I/O, the validation block, or the
   adaptive refinement logic.
 
-### P1.10 — Update `scripts/benchmark_gtlandscape.py` `[ ]`
+### P1.10 — Update `scripts/benchmark_gtlandscape.py` `[x]`
 
 Variant of `benchmark_functions.py` that reads a CSV ground truth
 instead of calling a known benchmark function. Takes 3 configs

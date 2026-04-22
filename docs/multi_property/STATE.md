@@ -12,23 +12,45 @@ a work session starts or ends, even if nothing got finished.
 
 ## Current status
 
-**Phase:** Phase 1 in progress — P1.1 and P1.2 done; P1.3 is next.
+**Phase:** Phase 1 in progress — P1.1–P1.10 done; P1.11 (regression test) is next.
 
 **What has been done so far:**
 
 - All architectural decisions (D1–D12) are recorded in `DESIGN.md`.
 - The phased plan is recorded in `PHASES.md` with step-level granularity.
-- `activereg/mlmodel/_multi_property.py` created with `MultiPropertyMLModel`
-  protocol, `IndependentMultiPropertyModel` class, and `wrap_single_property`
-  adapter. Shape contracts verified by smoke test.
-- `activereg/mlmodel/__init__.py` updated to re-export the three new symbols.
+- **P1.1** `activereg/mlmodel/_multi_property.py` created: `MultiPropertyMLModel`
+  protocol, `IndependentMultiPropertyModel`, `wrap_single_property`. Shape
+  contracts verified by smoke test.
+- **P1.2** `activereg/mlmodel/__init__.py` updated to re-export the three new symbols.
+- **P1.3** `setup_experiment_variables` assertion strengthened; return type annotation fixed.
+- **P1.4** `setup_multi_property_ml_model` factory added to `experiment.py`;
+  global-spec and per-property-spec paths both implemented and smoke-tested.
+- **P1.5** `AcquisitionFunction.landscape_acquisition` extended with optional
+  `target_variable` / `target_variables` / `weights` / `scalarization` / `y_stats`
+  params. Per-property branch implemented; joint branch raises `NotImplementedError`.
+  Legacy 2-arg call still works for backwards compat with old `MLModel` callers.
+- **P1.6** `sampling_block` refactored: takes `Y_train (N,P)` and
+  `IndependentMultiPropertyModel`; sequential-with-removal via `candidate_mask`
+  (fixes stale TODO). Smoke-tested no-duplicate property.
+  Key design detail: `target_variable` is stored in `AcquisitionFunction` at
+  init time so that `batch_highest_landscape`'s internal `landscape_acquisition`
+  call (no explicit target_variable) still uses the per-property predict branch.
+- **P1.7** `AcquisitionParametersGenerator._entry_identifier` helper added; protocol
+  lookup now matches by `name` or `acquisition_mode` fallback.
+- **P1.8** `landscape_sanity_check` docstring updated explaining 1-D guarantee.
+- **P1.9** `scripts/benchmark_functions.py` updated: model creation via
+  `setup_multi_property_ml_model`; `y_train` → `Y_train` (2D); logging fixed
+  (per-property dict replaces `[0]` indexing); `evaluate_cycle_metrics` wrapped
+  in per-property loop; adaptive refinement pool update fixed; grid search uses
+  first underlying model's class and `Y_train[:, 0]` for CV.
+- **P1.10** `scripts/benchmark_gtlandscape.py` — same changes as P1.9 (no grid search).
 
 **Next concrete action when work resumes:**
 
-**P1.3** — Refactor `setup_experiment_variables` in `activereg/experiment.py`
-to parse `target_variables` as the authoritative list and document that it is
-guaranteed non-empty. Then continue with P1.4 (`setup_multi_property_ml_model`
-factory).
+**P1.11** — Regression test: run an existing single-property Ackley 6D config
+end-to-end via `benchmark_functions.py` and verify the sampled points match the
+pre-refactor run. This step requires running the actual script; see PHASES.md for
+validation criteria.
 
 ---
 
@@ -124,13 +146,13 @@ re-verified against the current codebase in a single session. Worth a
   assumptions before writing code:
   - Numbered-suffix handling at `acquisition.py:103-108` confirmed intact.
   - Stale TODO is at `experiment.py:334` (STATE.md had 341 — 7-line shift,
-    minor; same comment text, still unfixed, P1.6 will address it).
-  - `.ravel()` and `[0]` patterns confirmed at the expected locations
+    minor; fixed in P1.6 via explicit `candidate_mask` sequential-with-removal).
+  - `.ravel()` and `[0]` patterns confirmed at expected locations
     (`benchmark_functions.py:599` vs 598 — 1-line shift only).
   - `AnchoredEnsembleMLP.predict()` at `_mlp.py:80-91` confirmed:
     squeezes to `(N,)` only when `out_feats == 1`.
-  - Completed **P1.1** (`_multi_property.py`) and **P1.2** (`__init__.py`
-    re-exports). Shape contracts verified by smoke test.
+  - Completed **P1.1–P1.10** in a single session. All smoke tests pass.
+    P1.11 (regression test) remains — requires running the actual script.
 
 ---
 

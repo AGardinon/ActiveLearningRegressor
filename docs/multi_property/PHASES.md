@@ -338,10 +338,40 @@ File: `activereg/experiment.py` (or a new `_config.py`).
   resolved weights, per-entry landscape labeling).
 - `scripts/benchmark_gtlandscape.py`: same.
 
-### P2.7 — Worked example configs `[ ]`
+### P2.7a — Extend `benchmarkFunctions.py` with multi-objective functions `[ ]`
+
+**Prerequisite for P2.7b.** Extend `activereg/benchmarkFunctions.py` with a
+multi-objective function suite following the same pattern as the existing
+single-objective dicts. Functions chosen from
+`botorch.test_functions.multi_objective`; all are scalable in input
+dimension and (where noted) in number of objectives.
+
+**Agreed function suite:**
+
+| Entry name pattern | Class | Input dim | Objectives | Pareto front | Role |
+|---|---|---|---|---|---|
+| `BraninCurrin` | `BraninCurrin` | 2 (fixed) | 2 (fixed) | known, literature-standard | **baseline / hello-world**: fast, visualisable, directly comparable to published BO results; not scalable but that is not its job |
+| `DTLZ2_2obj_Nd` | `DTLZ2` | configurable | configurable | spherical, convex, continuous | easy scalable benchmark |
+| `ZDT3_2obj_Nd` | `ZDT3` | configurable | 2 (fixed) | convex but **discontinuous** (5 segments) | medium — tests ParEGO coverage of disconnected regions |
+| `DTLZ7_2obj_Nd` | `DTLZ7` | configurable | configurable | **disconnected**, M separate regions | hard — stress-test and future Phase 3 EHVI comparison baseline |
+
+Add at minimum these concrete entries: `BraninCurrin`, `DTLZ2_2obj_4D`,
+`DTLZ2_2obj_6D`, `ZDT3_2obj_4D`, `ZDT3_2obj_6D`, `DTLZ7_2obj_4D`.
+
+**Before writing code:** verify that `DatasetGenerator.generate_dataset`
+(in `activereg/data.py`) correctly handles multi-output functions.
+The function already accepts `target_label: list[str]` and the
+`benchmarkFunctions.py` functions return a `pd.DataFrame`; there is a
+pre-existing `if` branch in `generate_dataset` that checks for multi-output
+return — confirm it writes multiple y columns to the DataFrame rather than
+assuming a scalar. Fix if needed before adding the new entries.
+
+### P2.7b — Worked example configs `[ ]`
 
 Add a fully worked **multi-file** config set (matching the real
-`benchmark_functions.py` contract — 4 YAML files):
+`benchmark_functions.py` contract — 4 YAML files), using `BraninCurrin`
+as the target function — fast to run, known Pareto front, directly comparable
+to published results, ideal for validating the full pipeline before scaling up:
 
 - `scripts/general_config/benchmark_config_multiprop.yaml` with
   `target_variables: [y1, y2]`, `batch_selection` block (global
@@ -355,8 +385,7 @@ Add a fully worked **multi-file** config set (matching the real
 - `scripts/mlmodel_config/gpr_config.yaml` — unchanged (global spec
   path, applied to both properties).
 - `scripts/general_config/target_function_config_multiprop.yaml`
-  using a 2D benchmark (e.g., two Ackley surfaces with different
-  centers, or Ackley + Rastrigin as the two properties).
+  referencing `DTLZ2_2obj_4D`.
 
 ### P2.8 — Reference run `[ ]`
 

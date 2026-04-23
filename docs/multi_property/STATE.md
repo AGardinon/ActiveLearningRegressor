@@ -45,6 +45,25 @@ scripts to capture `_resolved_weights` and `_y_best_z` from the `per_entry_meta`
 returned by `sampling_block`. Also call `validate_acquisition_params` at experiment
 setup time in both scripts. See PHASES.md §P2.6.
 
+**After P2.6 — multi-objective function suite (P2.7a before P2.7b):**
+
+The agreed function suite for multi-property benchmarks (all from
+`botorch.test_functions.multi_objective`, scalable in input dimension):
+
+| Role | Function | Why |
+|------|----------|-----|
+| Baseline / hello-world | `BraninCurrin` | fixed 2D input, 2 objectives, known Pareto front, literature-standard; fast and visualisable — the right function to validate the pipeline end-to-end before scaling up |
+| Easy scalable | `DTLZ2` | spherical/convex Pareto front, fully scalable in d and P; the standard "does it work" benchmark |
+| Medium | `ZDT3` | 2-objective, discontinuous front (5 segments); tests ParEGO coverage of disconnected regions |
+| Hard | `DTLZ7` | disconnected, M separate Pareto regions; future stress-test and Phase 3 (EHVI) comparison baseline |
+
+Same addition pattern as existing `FUNCTIONS_DICT` entries in
+`activereg/benchmarkFunctions.py`. **Before writing new entries**, read
+`DatasetGenerator.generate_dataset` in `activereg/data.py` and confirm the
+pre-existing multi-output `if` branch writes multiple y columns to the
+DataFrame correctly (there is one but it has not been exercised for
+multi-property). Fix first if needed.
+
 ---
 
 ## Open questions

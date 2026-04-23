@@ -229,6 +229,98 @@ def setup_multi_property_ml_model(
     return regmodels.IndependentMultiPropertyModel(models)
 
 
+def validate_acquisition_params(
+    acquisition_params: list[dict],
+    target_names: list[str],
+) -> None:
+    """Validate acquisition parameter entries against the declared target names.
+
+    Raises ``ValueError`` with a descriptive message on the first malformed
+    entry.  Designed to be called once at experiment setup time, before the AL
+    cycle loop, so config mistakes surface immediately rather than mid-run.
+
+    Rules enforced:
+
+    * ``target_variable`` and ``target_variables`` are mutually exclusive.
+    * If ``target_variable`` is present, the name must exist in ``target_names``.
+    * If ``target_variables`` is present:
+      - Must be a non-empty list.
+      - All referenced names must exist in ``target_names``.
+      - Must have exactly one of ``weight_sampler`` or ``weights`` (not both,
+        not neither).
+      - If ``weights`` is a fixed vector, its length must equal
+        ``len(target_variables)``.
+    * Entries with neither key are allowed (legacy single-property mode where
+      ``sampling_block`` falls back to ``prop_idx=0``).
+
+    Args:
+        acquisition_params: List of acquisition entry dicts (from the
+            acquisition_mode_settings YAML after loading).
+        target_names: Authoritative list of target property names for the
+            experiment (from the benchmark config YAML).
+
+    Raises:
+        ValueError: If any entry violates the rules above.
+    """
+    for i, entry in enumerate(acquisition_params):
+        label = (
+            f"acquisition entry {i} "
+            f"(name={entry.get('name', entry.get('acquisition_mode', '<unknown>'))!r})"
+        )
+
+        has_tv  = 'target_variable'  in entry
+        has_tvs = 'target_variables' in entry
+
+        if has_tv and has_tvs:
+            raise ValueError(
+                f"{label}: 'target_variable' and 'target_variables' are mutually "
+                "exclusive. Use 'target_variable' for a single-property entry, "
+                "'target_variables' for a joint scalarized entry."
+            )
+
+        if has_tv:
+            tv = entry['target_variable']
+            if tv not in target_names:
+                raise ValueError(
+                    f"{label}: target_variable={tv!r} is not in "
+                    f"target_names={target_names}."
+                )
+
+        if has_tvs:
+            tvs = entry['target_variables']
+            if not isinstance(tvs, list) or len(tvs) == 0:
+                raise ValueError(
+                    f"{label}: 'target_variables' must be a non-empty list, "
+                    f"got {tvs!r}."
+                )
+            missing = [t for t in tvs if t not in target_names]
+            if missing:
+                raise ValueError(
+                    f"{label}: 'target_variables' references names not in "
+                    f"target_names: {missing}. target_names={target_names}."
+                )
+            has_ws = 'weight_sampler' in entry
+            has_w  = 'weights' in entry
+            if has_ws and has_w:
+                raise ValueError(
+                    f"{label}: 'weight_sampler' and 'weights' are mutually "
+                    "exclusive. Use 'weight_sampler' for per-cycle random weights "
+                    "or 'weights' for a fixed vector."
+                )
+            if not has_ws and not has_w:
+                raise ValueError(
+                    f"{label}: joint entry (target_variables) must specify either "
+                    "'weight_sampler' or 'weights'."
+                )
+            if has_w:
+                w = entry['weights']
+                if len(w) != len(tvs):
+                    raise ValueError(
+                        f"{label}: len(weights)={len(w)} does not match "
+                        f"len(target_variables)={len(tvs)}."
+                    )
+
+
 def create_gpr_instance(model_parameters: dict) -> regmodels.MLModel:
     """Creates a Gaussian Process Regressor instance.
     Dictionary must contain the following keys:

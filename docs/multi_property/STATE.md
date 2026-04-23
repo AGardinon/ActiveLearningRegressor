@@ -12,7 +12,7 @@ a work session starts or ends, even if nothing got finished.
 
 ## Current status
 
-**Phase:** Phase 2 in progress — P1 complete; P2.1–P2.4 done; P2.5 next.
+**Phase:** Phase 2 in progress — P1 complete; P2.1–P2.5 done; P2.6 next.
 
 **What has been done so far:**
 
@@ -40,9 +40,10 @@ a work session starts or ends, even if nothing got finished.
 
 **Next concrete action when work resumes:**
 
-**P2.5** — Config schema validation in `experiment.py`: validate that each entry has
-exactly one of `target_variable` / `target_variables`; validate that all referenced
-target names exist; validate weight config completeness. See PHASES.md §P2.5.
+**P2.6** — End-to-end driver updates: extend the per-cycle log in both benchmark
+scripts to capture `_resolved_weights` and `_y_best_z` from the `per_entry_meta`
+returned by `sampling_block`. Also call `validate_acquisition_params` at experiment
+setup time in both scripts. See PHASES.md §P2.6.
 
 ---
 
@@ -166,6 +167,12 @@ re-verified against the current codebase in a single session. Worth a
     sites in both benchmark scripts updated (unpack 3-tuple; pass `rng`).
     Note: `rng` for the `random` fast-path still uses `np.random.choice` (legacy
     global state) — minor cleanup deferred.
+  - **P2.5** — `validate_acquisition_params(acquisition_params, target_names)`
+    added to `experiment.py`. All 7 error conditions enforced with clear messages
+    citing the offending entry name. Spec deviation: "neither target key" is
+    allowed (legacy single-property mode) rather than required to have one — this
+    preserves backwards compatibility with existing production configs. Not yet
+    called from benchmark scripts — that is part of P2.6.
 
 ---
 

@@ -318,7 +318,7 @@ File: `activereg/experiment.py`.
 - Log the sampled weights into the cycle log JSON so experiments
   are reproducible and postmortem-able.
 
-### P2.5 — Config schema validation `[ ]`
+### P2.5 — Config schema validation `[x]`
 
 File: `activereg/experiment.py` (or a new `_config.py`).
 

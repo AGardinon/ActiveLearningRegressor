@@ -47,10 +47,23 @@ a work session starts or ends, even if nothing got finished.
 
 **Next concrete action when work resumes:**
 
-**P1.11** — Regression test: run an existing single-property Ackley 6D config
-end-to-end via `benchmark_functions.py` and verify the sampled points match the
-pre-refactor run. This step requires running the actual script; see PHASES.md for
-validation criteria.
+**P1.11** — Regression test is currently running (Andrea is running it). Once it
+passes, Phase 1 is done and Phase 2 begins.
+
+**Phase 2 entry point:** Start with P2.1 (`scalarize`, `compute_per_property_stats`
+in `activereg/acquisition.py`) and P2.2 (`WeightSampler`). These are pure
+utilities with no external coupling and can be written and tested in isolation
+before wiring the joint acquisition path.
+
+**Open design question before coding P2.3/P2.4:**
+`y_best_z` (the scalarized best value needed by EI-style formulas on joint entries)
+could be computed either:
+- **Inside `sampling_block`** — cleaner API, fewer things to pass, but the cycle
+  loop cannot log it cheaply.
+- **Outside `sampling_block`** (pre-embedded in the entry dict alongside
+  `_resolved_weights`) — cycle loop logs it for free, consistent with how
+  `_resolved_weights` is handled.
+Discuss with Andrea before implementing P2.3/P2.4.
 
 ---
 

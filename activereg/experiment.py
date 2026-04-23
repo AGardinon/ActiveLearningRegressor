@@ -11,7 +11,10 @@ from activereg.acquisition import (
     penalize_landscape_fast,
     AcquisitionFunction,
     landscape_sanity_check,
-    BatchSelectionStrategy
+    BatchSelectionStrategy,
+    compute_per_property_stats,
+    scalarize,
+    WeightSampler,
 )
 
 
@@ -327,8 +330,14 @@ def sampling_block(
         batch_selection_method: str,
         batch_selection_params: dict,
         penalization_params: tuple[float, float] = (0.25, 1.0),
-    ) -> tuple[list[int], np.ndarray]:
-    """Samples new points from the landscape of the acquisition function.
+        rng: np.random.Generator | None = None,
+    ) -> tuple[list[int], np.ndarray, list[dict | None]]:
+    """Samples new points from the acquisition landscape.
+
+    A self-contained sampling unit: trains nothing, just takes a model and a
+    candidate pool, runs one full cycle of acquisition + batch selection, and
+    returns the selected indices, the per-entry padded landscapes, and
+    per-entry metadata (resolved weights and ``y_best_z`` for joint entries).
 
     Args:
         X_candidates (np.ndarray): Candidate points, shape (M, d).
@@ -336,22 +345,31 @@ def sampling_block(
         Y_train (np.ndarray): Training targets, shape (N, P). Single-property
             callers should pass a 2-D array of shape (N, 1).
         ml_model (IndependentMultiPropertyModel): Trained multi-property model.
-            Single-property callers should wrap their model with
-            ``wrap_single_property`` before calling.
-        acquisition_params (list[dict]): Acquisition function parameters for the
-            cycle. Each entry must contain ``acquisition_mode``, ``n_points``,
-            and (for Phase 1) ``target_variable`` naming the property to optimise.
+        acquisition_params (list[dict]): Per-entry acquisition parameters.
+            Each entry must contain ``acquisition_mode`` and ``n_points``.
+            Per-property entries carry ``target_variable``.
+            Joint entries carry ``target_variables`` and either
+            ``weight_sampler`` or ``weights``.
         batch_selection_method (str): Batch selection strategy
-            (highest_landscape | constant_liar | kriging_believer |
-            local_penalization). Only ``highest_landscape`` is tested with
-            multi-property models; the others are single-property legacy paths.
+            (``highest_landscape`` | ``constant_liar`` | ``kriging_believer`` |
+            ``local_penalization``). Only ``highest_landscape`` is tested with
+            multi-property models.
         batch_selection_params (dict): Parameters for the batch selection strategy.
-        penalization_params (tuple[float, float], optional): (radius, strength)
-            for soft landscape penalization. Defaults to (0.25, 1.0).
+        penalization_params (tuple[float, float] | None): ``(radius, strength)``
+            for soft landscape penalization. Pass ``None`` to disable.
+        rng (np.random.Generator | None): Random generator for reproducible
+            weight sampling in joint entries. Required when any entry contains a
+            ``weight_sampler`` key; ignored otherwise.
 
     Returns:
-        tuple[list[int], np.ndarray]: Selected indices into ``X_candidates`` and
-            a landscape array of shape (n_entries, M) padded to full pool size.
+        tuple:
+            - ``list[int]``: Indices into ``X_candidates`` selected this cycle.
+            - ``np.ndarray``: Landscape array of shape ``(n_entries, M)`` with
+              each row padded to the full pool size.
+            - ``list[dict | None]``: Per-entry metadata. For joint entries:
+              ``{"_resolved_weights": np.ndarray, "_y_best_z": float,
+              "target_variables": list[str]}``. For per-property / fast-path
+              entries: ``None``.
     """
     M = len(X_candidates)
 
@@ -361,30 +379,103 @@ def sampling_block(
 
     X_train_copy = X_train.copy()
 
-    # candidate_mask: True = available for selection; implements sequential-with-removal (D11).
+    # Per-property stats computed once per cycle (D8); used by joint entries.
+    y_stats = compute_per_property_stats(Y_train, ml_model.target_names)
+
+    # candidate_mask: True = available; shrinks across entries (D11).
     candidate_mask = np.ones(M, dtype=bool)
 
     sampled_new_idx: list[int] = []
     landscape_list: list[np.ndarray] = []
+    per_entry_meta: list[dict | None] = []
 
     for acp in acquisition_params:
         acqui_param = acp.copy()
         n_points_per_style = acqui_param.pop('n_points')
-        # target_variable is intentionally NOT popped: it flows into AcquisitionFunction.__init__
-        # so that internal callers (e.g. batch_highest_landscape) also use the per-property branch.
-        target_variable = acqui_param.get('target_variable', None)
+        # target_variable is NOT popped: it flows into AcquisitionFunction.__init__
+        # so that internal callers (e.g. batch_highest_landscape) use the right branch.
+        target_variable    = acqui_param.get('target_variable', None)
+        target_variables_e = acqui_param.get('target_variables', None)
+
+        # ------------------------------------------------------------------
+        # Weight resolution and y_best_z for joint entries (P2.4).
+        # For per-property entries these stay None.
+        # ------------------------------------------------------------------
+        resolved_weights: np.ndarray | None = None
+        y_best_z_val: float | None = None
+
+        if target_variables_e is not None:
+            weight_sampler_cfg = acqui_param.get('weight_sampler', None)
+            weights_cfg        = acqui_param.get('weights', None)
+            scal_method = acqui_param.get('scalarization', 'augmented_chebyshev')
+            rho_val     = float(acqui_param.get('rho', 0.05))
+
+            if weight_sampler_cfg is not None:
+                if rng is None:
+                    raise ValueError(
+                        "rng (np.random.Generator) must be passed to sampling_block "
+                        "when acquisition entries use 'weight_sampler'. "
+                        "Create one with np.random.default_rng(seed) and pass it."
+                    )
+                ws = WeightSampler(
+                    mode=weight_sampler_cfg['mode'],
+                    n_properties=len(target_variables_e),
+                    alpha=float(weight_sampler_cfg.get('alpha', 1.0)),
+                )
+                resolved_weights = ws.sample(rng)
+            elif weights_cfg is not None:
+                w = np.asarray(weights_cfg, dtype=float)
+                resolved_weights = w / w.sum()
+            else:
+                entry_id = acqui_param.get('name', acqui_param.get('acquisition_mode'))
+                raise ValueError(
+                    f"Joint acquisition entry '{entry_id}' must have either "
+                    "'weight_sampler' or 'weights'."
+                )
+
+            # Compute y_best_z: max scalarized observed value in training set.
+            prop_indices = [ml_model.target_names.index(t) for t in target_variables_e]
+            Y_sub     = Y_train[:, prop_indices]
+            y_min_arr = np.array([y_stats[t][0] for t in target_variables_e])
+            y_max_arr = np.array([y_stats[t][1] for t in target_variables_e])
+            mu_z_obs, _ = scalarize(
+                Y_sub, np.zeros_like(Y_sub), resolved_weights, y_min_arr, y_max_arr,
+                method=scal_method, rho=rho_val,
+            )
+            y_best_z_val = float(mu_z_obs.max())
+
+            # Inject resolved params into acqui_param so AcquisitionFunction.__init__
+            # stores them and internal callers (batch_highest_landscape) pick them up.
+            acqui_param['weights']  = resolved_weights
+            acqui_param['y_stats']  = y_stats
+
+        # Metadata returned to caller for logging.
+        per_entry_meta.append(
+            {
+                '_resolved_weights': resolved_weights,
+                '_y_best_z':         y_best_z_val,
+                'target_variables':  target_variables_e,
+            } if target_variables_e is not None else None
+        )
+
+        # ------------------------------------------------------------------
+        # y_best and y_train_1d for this entry.
+        # ------------------------------------------------------------------
+        if target_variables_e is not None:
+            y_best     = y_best_z_val
+            y_train_1d = None       # only highest_landscape supported for joint entries
+        elif target_variable is not None:
+            prop_idx   = ml_model.target_names.index(target_variable)
+            y_best     = float(np.max(Y_train[:, prop_idx]))
+            y_train_1d = Y_train[:, prop_idx]
+        else:
+            prop_idx   = 0
+            y_best     = float(np.max(Y_train[:, prop_idx]))
+            y_train_1d = Y_train[:, prop_idx]
 
         # Sub-pool of candidates not yet selected by earlier entries.
         idx_map = np.flatnonzero(candidate_mask)   # sub-pool → full-pool index
-        X_sub = X_candidates[candidate_mask]
-
-        # Per-property y_best for EI-style acquisition functions.
-        if target_variable is not None:
-            prop_idx = ml_model.target_names.index(target_variable)
-        else:
-            prop_idx = 0  # fallback; joint entries handled in Phase 2
-        y_best = float(np.max(Y_train[:, prop_idx]))
-        y_train_1d = Y_train[:, prop_idx]          # 1-D slice for batch strategies
+        X_sub   = X_candidates[candidate_mask]
 
         # --- random fast-path ---
         if acqui_param['acquisition_mode'] == 'random':
@@ -407,7 +498,7 @@ def sampling_block(
         acqui_func = AcquisitionFunction(y_best=y_best, **acqui_param)
 
         # Compute landscape over the current sub-pool.
-        # target_variable is already stored on acqui_func; no need to pass explicitly.
+        # All dispatch params are already stored on acqui_func; no need to pass explicitly.
         landscape_sub = acqui_func.landscape_acquisition(
             X_candidates=X_sub,
             ml_model=ml_model,
@@ -458,7 +549,7 @@ def sampling_block(
         candidate_mask[full_idx] = False
         X_train_copy = np.concatenate([X_train_copy, X_candidates[full_idx]])
 
-    return sampled_new_idx, np.vstack(landscape_list)
+    return sampled_new_idx, np.vstack(landscape_list), per_entry_meta
 
 
 def validation_block(gt_df: pd.DataFrame, sampled_df: pd.DataFrame, search_vars: list) -> pd.DataFrame:

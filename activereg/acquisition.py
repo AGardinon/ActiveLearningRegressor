@@ -292,6 +292,11 @@ class AcquisitionFunction:
         # that call landscape_acquisition without explicit target args still work)
         self.target_variable = kwargs.get('target_variable', None)
         self.target_variables = kwargs.get('target_variables', None)
+        # joint-entry scalarization params (P2.3)
+        self.weights = kwargs.get('weights', None)
+        self.scalarization = kwargs.get('scalarization', 'augmented_chebyshev')
+        self.y_stats = kwargs.get('y_stats', None)
+        self.rho = float(kwargs.get('rho', 0.05))
         # assertions
         if self.acquisition_mode == 'expected_improvement':
             assert self.xi >= 0, "`xi` must be non-negative."
@@ -308,53 +313,77 @@ class AcquisitionFunction:
         target_variable: str | None = None,
         target_variables: list[str] | None = None,
         weights: np.ndarray | None = None,
-        scalarization: str = "augmented_chebyshev",
+        scalarization: str | None = None,
         y_stats: dict | None = None,
+        rho: float | None = None,
     ) -> np.ndarray:
         """Generate a 1-D acquisition landscape over the candidate points.
 
-        The ``target_variable`` / ``target_variables`` parameters select the
-        multi-property dispatch branch:
+        Dispatch logic (first match wins):
 
-        - ``target_variable`` (str): per-property branch — calls
-          ``ml_model.predict_property(X_candidates, target_variable)`` and
-          applies the single-property formula.  Requires a
-          ``MultiPropertyMLModel``.
-        - ``target_variables`` (list[str]): joint branch — scalarizes across
-          multiple properties.  **Not implemented in Phase 1; raises
-          NotImplementedError.**
-        - both ``None``: legacy path — calls ``ml_model.predict(X_candidates)``
-          directly, expects 1-D ``mu`` / ``sigma`` (backwards compatible with
-          single-property ``MLModel`` callers).
+        1. ``target_variables`` is not None → **joint branch**: scalarize across
+           the listed properties via ``scalarize()``, feed ``(mu_z, sigma_z)``
+           into the standard single-property formula. Requires ``weights`` and
+           ``y_stats``.
+        2. ``target_variable`` is not None → **per-property branch**: call
+           ``ml_model.predict_property()``.
+        3. Both None → **legacy path**: call ``ml_model.predict()`` directly
+           (single-property ``MLModel`` backwards compat).
+
+        For internal callers such as ``batch_highest_landscape`` that invoke
+        this method with no explicit args, all dispatch parameters default to
+        the values stored on the instance at construction time.
 
         Args:
-            X_candidates (np.ndarray): Candidate points for evaluation.
-            ml_model: Trained ML model — either a single-property ``MLModel``
-                or a ``MultiPropertyMLModel``.
-            target_variable (str | None): Name of a single property to evaluate.
-            target_variables (list[str] | None): Names of properties for joint
-                scalarized acquisition (Phase 2).
-            weights (np.ndarray | None): Per-property weights for scalarization
-                (Phase 2).
-            scalarization (str): Scalarization method — reserved for Phase 2.
-            y_stats (dict | None): Per-property (y_min, y_max) stats for
-                normalization (Phase 2).
+            X_candidates (np.ndarray): Candidate points.
+            ml_model: Trained model — ``MLModel`` or ``MultiPropertyMLModel``.
+            target_variable (str | None): Single property name (per-property branch).
+            target_variables (list[str] | None): Property names (joint branch).
+            weights (np.ndarray | None): Weight vector for joint scalarization;
+                overrides ``self.weights`` when not None.
+            scalarization (str | None): Scalarization method for joint branch;
+                overrides ``self.scalarization`` when not None.
+            y_stats (dict | None): Per-property ``(y_min, y_max)`` stats;
+                overrides ``self.y_stats`` when not None.
+            rho (float | None): Augmented Chebyshev regularisation coefficient;
+                overrides ``self.rho`` when not None.
 
         Returns:
             np.ndarray: 1-D acquisition landscape of length ``len(X_candidates)``.
         """
-        # Resolve effective targets: explicit args take precedence over stored instance attrs.
+        # Explicit args take precedence over stored instance attrs.
         effective_target_variables = target_variables if target_variables is not None else self.target_variables
-        effective_target_variable = target_variable if target_variable is not None else self.target_variable
+        effective_target_variable  = target_variable  if target_variable  is not None else self.target_variable
+        effective_weights          = weights           if weights          is not None else self.weights
+        effective_scalarization    = scalarization     if scalarization    is not None else self.scalarization
+        effective_y_stats          = y_stats           if y_stats          is not None else self.y_stats
+        effective_rho              = rho               if rho              is not None else self.rho
 
         if effective_target_variables is not None:
-            raise NotImplementedError(
-                "Joint multi-property acquisition (target_variables) is not "
-                "implemented in Phase 1. It will be added in Phase 2 "
-                "(see docs/multi_property/PHASES.md §P2.3)."
+            # Joint branch: scalarize across the requested properties.
+            if effective_weights is None:
+                raise ValueError(
+                    "weights must be provided for joint multi-property acquisition. "
+                    "They are resolved by sampling_block via WeightSampler or a fixed list."
+                )
+            if effective_y_stats is None:
+                raise ValueError(
+                    "y_stats must be provided for joint multi-property acquisition. "
+                    "Call compute_per_property_stats(Y_train, target_names) in sampling_block."
+                )
+            _, mus, sigmas = ml_model.predict(X_candidates)  # (N, P_all)
+            # Slice to the declared target_variables in the declared order.
+            prop_indices = [ml_model.target_names.index(t) for t in effective_target_variables]
+            mus_sub    = mus[:, prop_indices]    # (N, P_sub)
+            sigmas_sub = sigmas[:, prop_indices]  # (N, P_sub)
+            y_min_arr = np.array([effective_y_stats[t][0] for t in effective_target_variables])
+            y_max_arr = np.array([effective_y_stats[t][1] for t in effective_target_variables])
+            mu, sigma = scalarize(
+                mus_sub, sigmas_sub, effective_weights, y_min_arr, y_max_arr,
+                method=effective_scalarization, rho=effective_rho,
             )
 
-        if effective_target_variable is not None:
+        elif effective_target_variable is not None:
             # Per-property branch: delegate predict to the named property.
             _, mu, sigma = ml_model.predict_property(X_candidates, effective_target_variable)
         else:

@@ -48,6 +48,7 @@ from activereg.experiment import (get_gt_dataframes,
                                   setup_multi_property_ml_model,
                                   remove_evidence_from_gt,
                                   setup_experiment_variables,
+                                  validate_acquisition_params,
                                   AcquisitionParametersGenerator)
 from typing import List, Tuple
 from sklearn.base import BaseEstimator
@@ -248,6 +249,7 @@ if __name__ == '__main__':
         acquisition_params=acquisition_parameters,
         acquisition_protocol=acquisition_protocol
     )
+    validate_acquisition_params(acquisition_parameters, TARGET_VAR)
     # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
@@ -430,7 +432,7 @@ if __name__ == '__main__':
                 y_pred_val, y_unc_val = None, None
 
             # Sample from the candidates
-            sampled_indexes, landscape, _ = sampling_block(
+            sampled_indexes, landscape, cycle_meta = sampling_block(
                 X_candidates=X_candidates,
                 X_train=X_train,
                 Y_train=Y_train,
@@ -459,6 +461,11 @@ if __name__ == '__main__':
                 )
                 cycle_metrics_dict.update({f"{k}_{name}": v for k, v in prop_metrics.items()})
             cycle_data_dict.update(cycle_metrics_dict)
+            for entry, meta in zip(cycle_acqui_params, cycle_meta):
+                if meta is not None:
+                    entry_id = entry.get('name', entry.get('acquisition_mode', 'joint'))
+                    cycle_data_dict[f"y_best_z_{entry_id}"] = meta['_y_best_z']
+                    cycle_data_dict[f"resolved_weights_{entry_id}"] = meta['_resolved_weights'].tolist()
             benchmark_data.append(cycle_data_dict)
 
             # Update the train and candidates sets

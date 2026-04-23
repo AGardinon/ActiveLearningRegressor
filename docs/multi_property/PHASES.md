@@ -331,14 +331,14 @@ File: `activereg/experiment.py` (or a new `_config.py`).
 - Validate that `len(weights) == len(target_variables)` when fixed.
 - Clear error messages that cite the offending entry `name`.
 
-### P2.6 — End-to-end driver updates `[ ]`
+### P2.6 — End-to-end driver updates `[x]`
 
 - `scripts/benchmark_functions.py`: extend the per-cycle loop to
   handle multi-property logging (per-target `y_best`, per-entry
   resolved weights, per-entry landscape labeling).
 - `scripts/benchmark_gtlandscape.py`: same.
 
-### P2.7a — Extend `benchmarkFunctions.py` with multi-objective functions `[ ]`
+### P2.7a — Extend `benchmarkFunctions.py` with multi-objective functions `[x]`
 
 **Prerequisite for P2.7b.** Extend `activereg/benchmarkFunctions.py` with a
 multi-objective function suite following the same pattern as the existing
@@ -366,7 +366,7 @@ pre-existing `if` branch in `generate_dataset` that checks for multi-output
 return — confirm it writes multiple y columns to the DataFrame rather than
 assuming a scalar. Fix if needed before adding the new entries.
 
-### P2.7b — Worked example configs `[ ]`
+### P2.7b — Worked example configs `[x]`
 
 Add a fully worked **multi-file** config set (matching the real
 `benchmark_functions.py` contract — 4 YAML files), using `BraninCurrin`

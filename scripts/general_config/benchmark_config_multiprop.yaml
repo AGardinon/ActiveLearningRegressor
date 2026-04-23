@@ -1,0 +1,55 @@
+# ------------------------------------------------------------------------------
+# Multi-property benchmark configuration — BraninCurrin baseline
+# Reference run for ParEGO (Phase 2 validation)
+# ------------------------------------------------------------------------------
+SEED: 42
+
+experiment_name: "2D/branincurrin_gpr_parego_20cy_5pts"
+experiment_notes: "Phase 2 ParEGO reference run on BraninCurrin (2D input, 2 objectives)"
+
+# --------------------------------------------------------------
+# Ground truth: no CSV — pool and validation are generated on the fly
+# (see target_function_config_multiprop.yaml)
+ground_truth_file: null
+experiment_evidence: null
+
+# --------------------------------------------------------------
+# Search space and target variable configuration
+search_space_variables:
+  - "x1"
+  - "x2"
+
+target_variables:
+  - "y1"
+  - "y2"
+
+# --------------------------------------------------------------
+# Data scaling configuration
+data_scaler: "StandardScaler"
+scaler_params: null
+
+# --------------------------------------------------------------
+# Cycles parameters
+n_cycles: 20
+init_batch_size: 10
+init_sampling: "lhs"
+
+landscape_penalization: null
+
+batch_selection:
+  method: "highest_landscape"
+  method_params:
+    percentile: 90
+    sampling_method: "voronoi"
+
+# Multi-stage acquisition protocol
+# Entry names match the `name:` fields in acquisition_mode_settings_multiprop.yaml
+acquisition_protocol:
+  stage_1:
+    cycles: 20
+    acquisition_modes: ['explore_y1', 'explore_y2', 'parego_joint']
+    n_points: [1, 1, 3]
+
+# --------------------------------------------------------------
+# Adaptive refinement: disabled for baseline reference run
+adaptive_refinement: null

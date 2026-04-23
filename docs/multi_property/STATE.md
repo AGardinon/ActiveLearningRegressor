@@ -12,7 +12,7 @@ a work session starts or ends, even if nothing got finished.
 
 ## Current status
 
-**Phase:** Phase 2 in progress — P1 complete; P2.1–P2.5 done; P2.6 next.
+**Phase:** Phase 2 in progress — P1 complete; P2.1–P2.7b done; P2.8 next (reference run).
 
 **What has been done so far:**
 
@@ -40,10 +40,16 @@ a work session starts or ends, even if nothing got finished.
 
 **Next concrete action when work resumes:**
 
-**P2.6** — End-to-end driver updates: extend the per-cycle log in both benchmark
-scripts to capture `_resolved_weights` and `_y_best_z` from the `per_entry_meta`
-returned by `sampling_block`. Also call `validate_acquisition_params` at experiment
-setup time in both scripts. See PHASES.md §P2.6.
+**P2.8** — Reference run: run the BraninCurrin ParEGO config for ~20 cycles, produce a
+Pareto front scatter plot, archive under `insilico_al/reference_runs/multi_property_parego/`.
+See PHASES.md §P2.8. Command:
+```
+python scripts/benchmark_functions.py \
+  -bc scripts/general_config/benchmark_config_multiprop.yaml \
+  -mc scripts/mlmodel_config/gpr_config.yaml \
+  -acqmodes scripts/general_config/acquisition_mode_settings_multiprop.yaml \
+  -tfc scripts/general_config/target_function_config_multiprop.yaml
+```
 
 **After P2.6 — multi-objective function suite (P2.7a before P2.7b):**
 
@@ -192,6 +198,26 @@ re-verified against the current codebase in a single session. Worth a
     allowed (legacy single-property mode) rather than required to have one — this
     preserves backwards compatibility with existing production configs. Not yet
     called from benchmark scripts — that is part of P2.6.
+  - **P2.6** — End-to-end driver updates complete in both benchmark scripts:
+    `validate_acquisition_params` called at setup time; `rng = np.random.default_rng(seed)`
+    added; `cycle_meta` captured from `sampling_block` (was `_`); joint-entry metadata
+    (`_y_best_z`, `_resolved_weights`) logged into `cycle_data_dict` keyed by entry
+    `name` or `acquisition_mode`.
+  - **P2.7a** — Multi-objective function suite added to `activereg/benchmarkFunctions.py`.
+    `DatasetGenerator.generate_dataset` multi-output branch confirmed correct (no fix
+    needed). Added: `BraninCurrin` (with `_branin_currin_factory` adapter to absorb
+    `dim` kwarg), `DTLZ2_2obj_4D`, `DTLZ2_2obj_6D`, `ZDT3_2obj_4D`, `ZDT3_2obj_6D`,
+    `DTLZ7_2obj_4D` (using `functools.partial` to pre-bind `num_objectives=2`). All
+    produce `(N, 2)` output and correctly auto-label columns `y1`, `y2` via the existing
+    multi-output branch in `generate_dataset`. Also added classes to `FUNCTION_CLASSES`.
+  - **P2.7b** — 4-file worked example config set written:
+    - `scripts/general_config/benchmark_config_multiprop.yaml`
+    - `scripts/general_config/acquisition_mode_settings_multiprop.yaml`
+    - `scripts/mlmodel_config/gpr_config.yaml` (reused, no change needed)
+    - `scripts/general_config/target_function_config_multiprop.yaml`
+    Config loads, `validate_acquisition_params` passes, protocol dispatches correctly
+    to all 3 named entries (`explore_y1`, `explore_y2`, `parego_joint`) across all
+    20 cycles.
 
 ---
 

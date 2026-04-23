@@ -191,7 +191,7 @@ instead of calling a known benchmark function. Takes 3 configs
 and `scripts/run_labAL_cycle.py`. These predate the current production
 pipeline and will not be migrated in this branch.
 
-### P1.11 — Regression test: single-property configs still run `[ ]`
+### P1.11 — Regression test: single-property configs still run `[x]`
 
 - Pick an existing single-property Ackley 6D config
   (`ak6d_*` in `scripts/`) and run it end-to-end via
@@ -268,7 +268,7 @@ File: `activereg/mlmodel/_multi_property.py`.
 random weight sampling, plus a generic "scalarized" acquisition path
 that reuses the existing single-property formulas.
 
-### P2.1 — Add scalarization utilities `[ ]`
+### P2.1 — Add scalarization utilities `[x]`
 
 File: `activereg/acquisition.py` (or new `activereg/_scalarization.py`
 if it gets too big).
@@ -281,7 +281,7 @@ if it gets too big).
 - Augmented Chebyshev uses the subgradient approach described in
   `DESIGN.md` §D9 for `sigma_z`.
 
-### P2.2 — Add `WeightSampler` `[ ]`
+### P2.2 — Add `WeightSampler` `[x]`
 
 File: `activereg/acquisition.py`.
 

@@ -77,6 +77,180 @@ def penalize_landscape_fast(
     return corrected
 
 # --------------------------------------------------------------
+# Phase 2 — Multi-property scalarization utilities
+# --------------------------------------------------------------
+
+def compute_per_property_stats(
+    Y_train: np.ndarray,
+    target_names: list[str],
+) -> dict[str, tuple[float, float]]:
+    """Compute per-property (y_min, y_max) from the current training targets.
+
+    Used by ``scalarize`` to normalize each property to [0, 1] range before
+    applying the augmented Chebyshev or weighted-sum formula (DESIGN.md §D8).
+
+    Args:
+        Y_train: Training targets of shape (N, P).
+        target_names: Ordered list of P property names matching ``Y_train`` columns.
+
+    Returns:
+        dict mapping each name to ``(y_min, y_max)`` floats.
+    """
+    assert Y_train.ndim == 2 and Y_train.shape[1] == len(target_names), (
+        f"Y_train must be 2-D with {len(target_names)} columns, "
+        f"got shape {Y_train.shape}."
+    )
+    return {
+        name: (float(Y_train[:, i].min()), float(Y_train[:, i].max()))
+        for i, name in enumerate(target_names)
+    }
+
+
+def scalarize(
+    mus: np.ndarray,
+    sigmas: np.ndarray,
+    weights: np.ndarray,
+    y_min: np.ndarray,
+    y_max: np.ndarray,
+    method: str = "augmented_chebyshev",
+    rho: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Scalarize per-property (mu, sigma) arrays into 1-D acquisition inputs.
+
+    Implements ParEGO-style scalarization (Knowles 2006).  The uncertainty
+    ``sigma_z`` is propagated via the delta method under the independence
+    assumption (DESIGN.md §D9).
+
+    Supported methods:
+
+    * ``"augmented_chebyshev"`` (default): ::
+
+          mu_tilde_i = (mu_i - y_min_i) / (y_max_i - y_min_i + eps)
+          z = max_i(w_i * mu_tilde_i)  +  rho * sum_i(w_i * mu_tilde_i)
+
+      Gradient (delta method): ``dz/dmu_i = w_i * (rho + I(i == argmax)) / denom_i``.
+
+    * ``"weighted_sum"``: ``z = sum_i(w_i * mu_tilde_i)``.
+      Gradient: ``dz/dmu_i = w_i / denom_i``.
+
+    Args:
+        mus: Mean predictions of shape (N, P).
+        sigmas: Std predictions of shape (N, P).
+        weights: Weight vector of shape (P,), non-negative, should sum to 1.
+        y_min: Per-property minimum from training set, shape (P,).
+        y_max: Per-property maximum from training set, shape (P,).
+        method: Scalarization method — ``"augmented_chebyshev"`` or
+            ``"weighted_sum"``.
+        rho: Augmented Chebyshev regularization coefficient (default 0.05).
+
+    Returns:
+        ``(mu_z, sigma_z)``: 1-D arrays of length N.
+    """
+    eps = 1e-12
+    denom = y_max - y_min + eps                                     # (P,)
+
+    # Normalize: mu_tilde_i = (mu_i - y_min_i) / denom_i
+    mu_tilde = (mus - y_min[None, :]) / denom[None, :]              # (N, P)
+    w_tilde = weights[None, :] * mu_tilde                           # (N, P)
+
+    if method == "weighted_sum":
+        mu_z = np.sum(w_tilde, axis=1)                             # (N,)
+        grad = weights / denom                                      # (P,)
+        sigma_z = np.sqrt(np.sum((grad[None, :] * sigmas) ** 2, axis=1))
+
+    elif method == "augmented_chebyshev":
+        k_star = np.argmax(w_tilde, axis=1)                        # (N,)
+        mu_z = np.max(w_tilde, axis=1) + rho * np.sum(w_tilde, axis=1)
+        # active indicator: shape (N, P)
+        active = (np.arange(mus.shape[1])[None, :] == k_star[:, None]).astype(float)
+        grad = weights[None, :] * (active + rho) / denom[None, :]  # (N, P)
+        sigma_z = np.sqrt(np.sum((grad * sigmas) ** 2, axis=1))    # (N,)
+
+    else:
+        raise ValueError(
+            f"Unknown scalarization method '{method}'. "
+            "Choose 'augmented_chebyshev' or 'weighted_sum'."
+        )
+
+    return mu_z, sigma_z
+
+
+class WeightSampler:
+    """Sample weight vectors for ParEGO-style multi-property acquisition.
+
+    Three modes are supported:
+
+    * ``"dirichlet"``: draw from ``Dirichlet(alpha, ..., alpha)``.
+    * ``"uniform"``: alias for Dirichlet with ``alpha=1`` (uniform on simplex).
+    * ``"fixed"``: return a user-supplied constant weight vector (normalised to
+      sum to 1).
+
+    All sampling is done through a ``np.random.Generator`` so runs are
+    reproducible when the generator is seeded.
+
+    Args:
+        mode: ``"dirichlet"``, ``"uniform"``, or ``"fixed"``.
+        n_properties: Dimension of the weight vector.
+        alpha: Dirichlet concentration parameter (used only for
+            ``"dirichlet"`` mode; default 1.0 == uniform Dirichlet).
+        weights: Fixed weight vector of shape ``(n_properties,)`` (required for
+            ``"fixed"`` mode only).
+    """
+
+    def __init__(
+        self,
+        mode: str,
+        n_properties: int,
+        alpha: float = 1.0,
+        weights: np.ndarray | None = None,
+    ) -> None:
+        valid_modes = ("dirichlet", "uniform", "fixed")
+        if mode not in valid_modes:
+            raise ValueError(
+                f"Unknown WeightSampler mode '{mode}'. Choose from {valid_modes}."
+            )
+        if mode == "fixed":
+            if weights is None:
+                raise ValueError("'weights' must be provided when mode='fixed'.")
+            weights = np.asarray(weights, dtype=float)
+            if weights.shape != (n_properties,):
+                raise ValueError(
+                    f"weights must have shape ({n_properties},), got {weights.shape}."
+                )
+            if np.any(weights < 0):
+                raise ValueError("All weights must be non-negative.")
+        self.mode = mode
+        self.n_properties = n_properties
+        self.alpha = float(alpha)
+        self._weights = weights
+
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        """Draw a weight vector.
+
+        Args:
+            rng: NumPy random Generator (seeded externally for reproducibility).
+
+        Returns:
+            np.ndarray of shape ``(n_properties,)``, non-negative, summing to 1.
+        """
+        if self.mode in ("dirichlet", "uniform"):
+            alpha_val = self.alpha if self.mode == "dirichlet" else 1.0
+            return rng.dirichlet(np.full(self.n_properties, alpha_val))
+        # mode == "fixed"
+        total = self._weights.sum()
+        return self._weights / total if total > 0 else self._weights.copy()
+
+    def __repr__(self) -> str:
+        if self.mode == "fixed":
+            return f"WeightSampler(mode='fixed', weights={self._weights})"
+        return (
+            f"WeightSampler(mode='{self.mode}', n_properties={self.n_properties}"
+            + (f", alpha={self.alpha}" if self.mode == "dirichlet" else "")
+            + ")"
+        )
+
+
+# --------------------------------------------------------------
 # Acquisition function implementations
 # --------------------------------------------------------------
 

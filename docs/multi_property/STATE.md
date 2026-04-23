@@ -12,57 +12,56 @@ a work session starts or ends, even if nothing got finished.
 
 ## Current status
 
-**Phase:** Phase 1 in progress — P1.1–P1.10 done; P1.11 (regression test) is next.
+**Phase:** Phase 2 in progress — P1 complete; P2.1 and P2.2 done; P2.3 next (pending design decision).
 
 **What has been done so far:**
 
 - All architectural decisions (D1–D12) are recorded in `DESIGN.md`.
 - The phased plan is recorded in `PHASES.md` with step-level granularity.
-- **P1.1** `activereg/mlmodel/_multi_property.py` created: `MultiPropertyMLModel`
-  protocol, `IndependentMultiPropertyModel`, `wrap_single_property`. Shape
-  contracts verified by smoke test.
-- **P1.2** `activereg/mlmodel/__init__.py` updated to re-export the three new symbols.
-- **P1.3** `setup_experiment_variables` assertion strengthened; return type annotation fixed.
-- **P1.4** `setup_multi_property_ml_model` factory added to `experiment.py`;
-  global-spec and per-property-spec paths both implemented and smoke-tested.
-- **P1.5** `AcquisitionFunction.landscape_acquisition` extended with optional
-  `target_variable` / `target_variables` / `weights` / `scalarization` / `y_stats`
-  params. Per-property branch implemented; joint branch raises `NotImplementedError`.
-  Legacy 2-arg call still works for backwards compat with old `MLModel` callers.
-- **P1.6** `sampling_block` refactored: takes `Y_train (N,P)` and
-  `IndependentMultiPropertyModel`; sequential-with-removal via `candidate_mask`
-  (fixes stale TODO). Smoke-tested no-duplicate property.
-  Key design detail: `target_variable` is stored in `AcquisitionFunction` at
-  init time so that `batch_highest_landscape`'s internal `landscape_acquisition`
-  call (no explicit target_variable) still uses the per-property predict branch.
-- **P1.7** `AcquisitionParametersGenerator._entry_identifier` helper added; protocol
-  lookup now matches by `name` or `acquisition_mode` fallback.
-- **P1.8** `landscape_sanity_check` docstring updated explaining 1-D guarantee.
-- **P1.9** `scripts/benchmark_functions.py` updated: model creation via
-  `setup_multi_property_ml_model`; `y_train` → `Y_train` (2D); logging fixed
-  (per-property dict replaces `[0]` indexing); `evaluate_cycle_metrics` wrapped
-  in per-property loop; adaptive refinement pool update fixed; grid search uses
-  first underlying model's class and `Y_train[:, 0]` for CV.
-- **P1.10** `scripts/benchmark_gtlandscape.py` — same changes as P1.9 (no grid search).
+- **P1.1–P1.10** complete (see 2026-04-22 work log entry for detail).
+- **P1.11** — Single-property regression test completed. Evidence: the test was run
+  after `e69423b`; commit `249ef77` updated this file with "test is currently running";
+  commit `39b121f` removed a debug print inside the benchmark cycle loop — the only
+  change after the DOCS update, consistent with the test having completed without
+  errors. Marked `[x]` in `PHASES.md`. Confirm with Andrea if in doubt.
+- **P2.1** — `compute_per_property_stats(Y_train, target_names)` and
+  `scalarize(mus, sigmas, weights, y_min, y_max, method, rho)` added to
+  `activereg/acquisition.py` (new section before `AcquisitionFunction`).
+  **Spec deviation:** PHASES.md listed `compute_per_property_stats(Y_train)` with no
+  `target_names` param — that can't return a keyed dict without names. Added
+  `target_names` as a required argument.
+  **Spec deviation:** DESIGN.md §4.2 sketch passes `y_stats` dict to `scalarize`.
+  Changed to `y_min, y_max` (P,) arrays — the caller converts from the dict using
+  `target_variables` order. This makes `scalarize` purely array-based and unit-testable
+  without a dict dependency.
+- **P2.2** — `WeightSampler` added to `activereg/acquisition.py`. Supports
+  `"dirichlet"` (alpha param), `"uniform"` (Dirichlet α=1 alias), `"fixed"`.
+  `sample(rng)` takes a `np.random.Generator` for reproducibility.
 
 **Next concrete action when work resumes:**
 
-**P1.11** — Regression test is currently running (Andrea is running it). Once it
-passes, Phase 1 is done and Phase 2 begins.
-
-**Phase 2 entry point:** Start with P2.1 (`scalarize`, `compute_per_property_stats`
-in `activereg/acquisition.py`) and P2.2 (`WeightSampler`). These are pure
-utilities with no external coupling and can be written and tested in isolation
-before wiring the joint acquisition path.
+**P2.3** — Wire the joint acquisition branch in `landscape_acquisition`. Discuss the
+`y_best_z` design question with Andrea before writing P2.3/P2.4 code (see open
+question below).
 
 **Open design question before coding P2.3/P2.4:**
 `y_best_z` (the scalarized best value needed by EI-style formulas on joint entries)
-could be computed either:
-- **Inside `sampling_block`** — cleaner API, fewer things to pass, but the cycle
-  loop cannot log it cheaply.
-- **Outside `sampling_block`** (pre-embedded in the entry dict alongside
-  `_resolved_weights`) — cycle loop logs it for free, consistent with how
-  `_resolved_weights` is handled.
+could be computed and surfaced three ways:
+
+- **Option A — Inside `sampling_block`, no return change:** computed internally, not
+  surfaced. Outer loop cannot log it without re-computing.
+- **Option B — Outside `sampling_block`:** benchmark scripts pre-embed `_y_best_z` and
+  `_resolved_weights` in entry dicts before calling `sampling_block`. Logging is
+  trivial; `sampling_block` stays simple. Cost: benchmark scripts must import
+  `WeightSampler`, `scalarize`, `compute_per_property_stats`.
+- **Option C — Inside `sampling_block`, extended return (recommended):** compute
+  internally; return `(idxs, landscapes, per_entry_meta)` where `per_entry_meta` is
+  a list of dicts (one per acquisition entry) with `_resolved_weights` and `_y_best_z`
+  for joint entries, `None` for per-property entries. Also requires adding
+  `rng: np.random.Generator` to `sampling_block` signature (needed for Dirichlet
+  sampling; also fixes unseeded `np.random.choice` in the random fast-path).
+  Benchmark scripts log from the returned metadata — no duplication of logic.
+
 Discuss with Andrea before implementing P2.3/P2.4.
 
 ---
@@ -166,6 +165,15 @@ re-verified against the current codebase in a single session. Worth a
     squeezes to `(N,)` only when `out_feats == 1`.
   - Completed **P1.1–P1.10** in a single session. All smoke tests pass.
     P1.11 (regression test) remains — requires running the actual script.
+- **2026-04-23** — P1.11 regression test inferred complete from git history
+  (commit `249ef77` DOCS-only update with "test is currently running"; commit
+  `39b121f` removed debug print inside cycle loop — no error fixes committed).
+  Marked P1.11 `[x]`. Phase 2 started.
+  - **P2.1** — `compute_per_property_stats` and `scalarize` added to
+    `activereg/acquisition.py`. Two spec deviations noted in Current status.
+  - **P2.2** — `WeightSampler` added to `activereg/acquisition.py`.
+  - Raised `y_best_z` design question (Options A/B/C) for Andrea to decide
+    before P2.3/P2.4 code is written.
 
 ---
 

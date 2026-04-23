@@ -210,6 +210,7 @@ if __name__ == '__main__':
         np.random.seed(seed)
         random.seed(seed)
         torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)   # seeded Generator for sampling_block weight sampling
     # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
@@ -562,7 +563,7 @@ if __name__ == '__main__':
             _, y_pred_val, y_unc_val = ML_MODEL.predict(X_val)      # each (N_val, P)
 
             # Sample from the candidates
-            sampled_indexes, landscape = sampling_block(
+            sampled_indexes, landscape, _ = sampling_block(
                 X_candidates=X_candidates,
                 X_train=X_train,
                 Y_train=Y_train,
@@ -570,7 +571,8 @@ if __name__ == '__main__':
                 acquisition_params=cycle_acqui_params,
                 batch_selection_method=batch_selection_method,
                 batch_selection_params=batch_selection_params,
-                penalization_params=(pen_radius, pen_strength) if landscape_penalization is not None else None
+                penalization_params=(pen_radius, pen_strength) if landscape_penalization is not None else None,
+                rng=rng,
             )
 
             # Store benchmark data for the current cycle

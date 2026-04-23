@@ -292,7 +292,7 @@ File: `activereg/acquisition.py`.
 - Method: `sample(rng) -> np.ndarray`.
 - Seeded via a `np.random.Generator` so runs are reproducible.
 
-### P2.3 — Wire joint acquisition entries through the dispatcher `[ ]`
+### P2.3 — Wire joint acquisition entries through the dispatcher `[x]`
 
 File: `activereg/acquisition.py`.
 
@@ -304,7 +304,7 @@ File: `activereg/acquisition.py`.
   existing single-property formula.
 - The single-property formulas stay untouched.
 
-### P2.4 — Per-cycle weight resolution in `sampling_block` `[ ]`
+### P2.4 — Per-cycle weight resolution in `sampling_block` `[x]`
 
 File: `activereg/experiment.py`.
 

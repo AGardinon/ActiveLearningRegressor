@@ -12,7 +12,7 @@ a work session starts or ends, even if nothing got finished.
 
 ## Current status
 
-**Phase:** Phase 2 in progress — P1 complete; P2.1 and P2.2 done; P2.3 next (pending design decision).
+**Phase:** Phase 2 in progress — P1 complete; P2.1–P2.4 done; P2.5 next.
 
 **What has been done so far:**
 
@@ -40,29 +40,9 @@ a work session starts or ends, even if nothing got finished.
 
 **Next concrete action when work resumes:**
 
-**P2.3** — Wire the joint acquisition branch in `landscape_acquisition`. Discuss the
-`y_best_z` design question with Andrea before writing P2.3/P2.4 code (see open
-question below).
-
-**Open design question before coding P2.3/P2.4:**
-`y_best_z` (the scalarized best value needed by EI-style formulas on joint entries)
-could be computed and surfaced three ways:
-
-- **Option A — Inside `sampling_block`, no return change:** computed internally, not
-  surfaced. Outer loop cannot log it without re-computing.
-- **Option B — Outside `sampling_block`:** benchmark scripts pre-embed `_y_best_z` and
-  `_resolved_weights` in entry dicts before calling `sampling_block`. Logging is
-  trivial; `sampling_block` stays simple. Cost: benchmark scripts must import
-  `WeightSampler`, `scalarize`, `compute_per_property_stats`.
-- **Option C — Inside `sampling_block`, extended return (recommended):** compute
-  internally; return `(idxs, landscapes, per_entry_meta)` where `per_entry_meta` is
-  a list of dicts (one per acquisition entry) with `_resolved_weights` and `_y_best_z`
-  for joint entries, `None` for per-property entries. Also requires adding
-  `rng: np.random.Generator` to `sampling_block` signature (needed for Dirichlet
-  sampling; also fixes unseeded `np.random.choice` in the random fast-path).
-  Benchmark scripts log from the returned metadata — no duplication of logic.
-
-Discuss with Andrea before implementing P2.3/P2.4.
+**P2.5** — Config schema validation in `experiment.py`: validate that each entry has
+exactly one of `target_variable` / `target_variables`; validate that all referenced
+target names exist; validate weight config completeness. See PHASES.md §P2.5.
 
 ---
 
@@ -165,15 +145,27 @@ re-verified against the current codebase in a single session. Worth a
     squeezes to `(N,)` only when `out_feats == 1`.
   - Completed **P1.1–P1.10** in a single session. All smoke tests pass.
     P1.11 (regression test) remains — requires running the actual script.
-- **2026-04-23** — P1.11 regression test inferred complete from git history
-  (commit `249ef77` DOCS-only update with "test is currently running"; commit
-  `39b121f` removed debug print inside cycle loop — no error fixes committed).
-  Marked P1.11 `[x]`. Phase 2 started.
+- **2026-04-23** — P1.11 regression test inferred complete (commit `249ef77`
+  DOCS update "test is currently running"; commit `39b121f` removed debug print
+  inside cycle loop — no error fixes committed). Marked P1.11 `[x]`.
+  Phase 2 started. Andrea confirmed Option C for `y_best_z` (inside
+  `sampling_block`, extended 3-tuple return).
   - **P2.1** — `compute_per_property_stats` and `scalarize` added to
-    `activereg/acquisition.py`. Two spec deviations noted in Current status.
+    `activereg/acquisition.py`. Spec deviations: added `target_names` param
+    to `compute_per_property_stats`; changed `scalarize` to take `y_min`/`y_max`
+    arrays rather than `y_stats` dict.
   - **P2.2** — `WeightSampler` added to `activereg/acquisition.py`.
-  - Raised `y_best_z` design question (Options A/B/C) for Andrea to decide
-    before P2.3/P2.4 code is written.
+  - **P2.3** — Joint acquisition branch implemented in
+    `AcquisitionFunction.landscape_acquisition`. `NotImplementedError` replaced
+    with real scalarization dispatch. `AcquisitionFunction.__init__` extended to
+    store `weights`, `scalarization`, `y_stats`, `rho` so `batch_highest_landscape`
+    internal calls work without explicit args.
+  - **P2.4** — `sampling_block` extended: added `rng` param; computes `y_stats`
+    once per call; resolves weights per joint entry (Dirichlet or fixed);
+    computes `y_best_z`; returns `(idxs, landscapes, per_entry_meta)`. Call
+    sites in both benchmark scripts updated (unpack 3-tuple; pass `rng`).
+    Note: `rng` for the `random` fast-path still uses `np.random.choice` (legacy
+    global state) — minor cleanup deferred.
 
 ---
 

@@ -511,7 +511,7 @@ if __name__ == '__main__':
         # --------------------------------------------------------------------------------
         # CYCLES 1 -> N_CYCLES
         for cycle in tqdm(range(N_CYCLES), desc=f"Repetition {rep+1}/{N_REPS}"):
-            print(f"points acquired so far: {n_points_acquired, len(X_train)}")
+            # print(f"points acquired so far: {n_points_acquired, len(X_train)}")
             # ----------------------------------------------------------------------------
             # Grid search step (every N acquired points as defined in the config file)
             if perform_grid_search is True and n_points_acquired >= next_grid_search_target:

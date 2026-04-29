@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.stats import norm
 from scipy.spatial import cKDTree
-from activereg.mlmodel import MLModel
+from activereg.mlmodel import MLModel, MultiPropertyMLModel
 from activereg.sampling import sample_landscape
 
 # --------------------------------------------------------------
@@ -77,6 +77,180 @@ def penalize_landscape_fast(
     return corrected
 
 # --------------------------------------------------------------
+# Phase 2 — Multi-property scalarization utilities
+# --------------------------------------------------------------
+
+def compute_per_property_stats(
+    Y_train: np.ndarray,
+    target_names: list[str],
+) -> dict[str, tuple[float, float]]:
+    """Compute per-property (y_min, y_max) from the current training targets.
+
+    Used by ``scalarize`` to normalize each property to [0, 1] range before
+    applying the augmented Chebyshev or weighted-sum formula (DESIGN.md §D8).
+
+    Args:
+        Y_train: Training targets of shape (N, P).
+        target_names: Ordered list of P property names matching ``Y_train`` columns.
+
+    Returns:
+        dict mapping each name to ``(y_min, y_max)`` floats.
+    """
+    assert Y_train.ndim == 2 and Y_train.shape[1] == len(target_names), (
+        f"Y_train must be 2-D with {len(target_names)} columns, "
+        f"got shape {Y_train.shape}."
+    )
+    return {
+        name: (float(Y_train[:, i].min()), float(Y_train[:, i].max()))
+        for i, name in enumerate(target_names)
+    }
+
+
+def scalarize(
+    mus: np.ndarray,
+    sigmas: np.ndarray,
+    weights: np.ndarray,
+    y_min: np.ndarray,
+    y_max: np.ndarray,
+    method: str = "augmented_chebyshev",
+    rho: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Scalarize per-property (mu, sigma) arrays into 1-D acquisition inputs.
+
+    Implements ParEGO-style scalarization (Knowles 2006).  The uncertainty
+    ``sigma_z`` is propagated via the delta method under the independence
+    assumption (DESIGN.md §D9).
+
+    Supported methods:
+
+    * ``"augmented_chebyshev"`` (default): ::
+
+          mu_tilde_i = (mu_i - y_min_i) / (y_max_i - y_min_i + eps)
+          z = max_i(w_i * mu_tilde_i)  +  rho * sum_i(w_i * mu_tilde_i)
+
+      Gradient (delta method): ``dz/dmu_i = w_i * (rho + I(i == argmax)) / denom_i``.
+
+    * ``"weighted_sum"``: ``z = sum_i(w_i * mu_tilde_i)``.
+      Gradient: ``dz/dmu_i = w_i / denom_i``.
+
+    Args:
+        mus: Mean predictions of shape (N, P).
+        sigmas: Std predictions of shape (N, P).
+        weights: Weight vector of shape (P,), non-negative, should sum to 1.
+        y_min: Per-property minimum from training set, shape (P,).
+        y_max: Per-property maximum from training set, shape (P,).
+        method: Scalarization method — ``"augmented_chebyshev"`` or
+            ``"weighted_sum"``.
+        rho: Augmented Chebyshev regularization coefficient (default 0.05).
+
+    Returns:
+        ``(mu_z, sigma_z)``: 1-D arrays of length N.
+    """
+    eps = 1e-12
+    denom = y_max - y_min + eps                                     # (P,)
+
+    # Normalize: mu_tilde_i = (mu_i - y_min_i) / denom_i
+    mu_tilde = (mus - y_min[None, :]) / denom[None, :]              # (N, P)
+    w_tilde = weights[None, :] * mu_tilde                           # (N, P)
+
+    if method == "weighted_sum":
+        mu_z = np.sum(w_tilde, axis=1)                             # (N,)
+        grad = weights / denom                                      # (P,)
+        sigma_z = np.sqrt(np.sum((grad[None, :] * sigmas) ** 2, axis=1))
+
+    elif method == "augmented_chebyshev":
+        k_star = np.argmax(w_tilde, axis=1)                        # (N,)
+        mu_z = np.max(w_tilde, axis=1) + rho * np.sum(w_tilde, axis=1)
+        # active indicator: shape (N, P)
+        active = (np.arange(mus.shape[1])[None, :] == k_star[:, None]).astype(float)
+        grad = weights[None, :] * (active + rho) / denom[None, :]  # (N, P)
+        sigma_z = np.sqrt(np.sum((grad * sigmas) ** 2, axis=1))    # (N,)
+
+    else:
+        raise ValueError(
+            f"Unknown scalarization method '{method}'. "
+            "Choose 'augmented_chebyshev' or 'weighted_sum'."
+        )
+
+    return mu_z, sigma_z
+
+
+class WeightSampler:
+    """Sample weight vectors for ParEGO-style multi-property acquisition.
+
+    Three modes are supported:
+
+    * ``"dirichlet"``: draw from ``Dirichlet(alpha, ..., alpha)``.
+    * ``"uniform"``: alias for Dirichlet with ``alpha=1`` (uniform on simplex).
+    * ``"fixed"``: return a user-supplied constant weight vector (normalised to
+      sum to 1).
+
+    All sampling is done through a ``np.random.Generator`` so runs are
+    reproducible when the generator is seeded.
+
+    Args:
+        mode: ``"dirichlet"``, ``"uniform"``, or ``"fixed"``.
+        n_properties: Dimension of the weight vector.
+        alpha: Dirichlet concentration parameter (used only for
+            ``"dirichlet"`` mode; default 1.0 == uniform Dirichlet).
+        weights: Fixed weight vector of shape ``(n_properties,)`` (required for
+            ``"fixed"`` mode only).
+    """
+
+    def __init__(
+        self,
+        mode: str,
+        n_properties: int,
+        alpha: float = 1.0,
+        weights: np.ndarray | None = None,
+    ) -> None:
+        valid_modes = ("dirichlet", "uniform", "fixed")
+        if mode not in valid_modes:
+            raise ValueError(
+                f"Unknown WeightSampler mode '{mode}'. Choose from {valid_modes}."
+            )
+        if mode == "fixed":
+            if weights is None:
+                raise ValueError("'weights' must be provided when mode='fixed'.")
+            weights = np.asarray(weights, dtype=float)
+            if weights.shape != (n_properties,):
+                raise ValueError(
+                    f"weights must have shape ({n_properties},), got {weights.shape}."
+                )
+            if np.any(weights < 0):
+                raise ValueError("All weights must be non-negative.")
+        self.mode = mode
+        self.n_properties = n_properties
+        self.alpha = float(alpha)
+        self._weights = weights
+
+    def sample(self, rng: np.random.Generator) -> np.ndarray:
+        """Draw a weight vector.
+
+        Args:
+            rng: NumPy random Generator (seeded externally for reproducibility).
+
+        Returns:
+            np.ndarray of shape ``(n_properties,)``, non-negative, summing to 1.
+        """
+        if self.mode in ("dirichlet", "uniform"):
+            alpha_val = self.alpha if self.mode == "dirichlet" else 1.0
+            return rng.dirichlet(np.full(self.n_properties, alpha_val))
+        # mode == "fixed"
+        total = self._weights.sum()
+        return self._weights / total if total > 0 else self._weights.copy()
+
+    def __repr__(self) -> str:
+        if self.mode == "fixed":
+            return f"WeightSampler(mode='fixed', weights={self._weights})"
+        return (
+            f"WeightSampler(mode='{self.mode}', n_properties={self.n_properties}"
+            + (f", alpha={self.alpha}" if self.mode == "dirichlet" else "")
+            + ")"
+        )
+
+
+# --------------------------------------------------------------
 # Acquisition function implementations
 # --------------------------------------------------------------
 
@@ -114,6 +288,15 @@ class AcquisitionFunction:
         self.dist = kwargs.get('dist', None)
         self.epsilon = kwargs.get('epsilon', None)
         self.tei_percentage = kwargs.get('percentage', None)
+        # multi-property dispatch (stored so internal callers like batch_highest_landscape
+        # that call landscape_acquisition without explicit target args still work)
+        self.target_variable = kwargs.get('target_variable', None)
+        self.target_variables = kwargs.get('target_variables', None)
+        # joint-entry scalarization params (P2.3)
+        self.weights = kwargs.get('weights', None)
+        self.scalarization = kwargs.get('scalarization', 'augmented_chebyshev')
+        self.y_stats = kwargs.get('y_stats', None)
+        self.rho = float(kwargs.get('rho', 0.05))
         # assertions
         if self.acquisition_mode == 'expected_improvement':
             assert self.xi >= 0, "`xi` must be non-negative."
@@ -123,38 +306,105 @@ class AcquisitionFunction:
             assert self.tei_percentage is not None, "`percentage` must be provided for percentage_target_expected_improvement."
 
 
-    def landscape_acquisition(self, X_candidates: np.ndarray, ml_model: MLModel) -> np.ndarray:
-        """Generate an acquisition landscape for the given candidate points.
-        The methods assume one of the activereg.mlmodel is used, where the predict statement
-        automatically returns mean and standard dev.
+    def landscape_acquisition(
+        self,
+        X_candidates: np.ndarray,
+        ml_model: MLModel | MultiPropertyMLModel,
+        target_variable: str | None = None,
+        target_variables: list[str] | None = None,
+        weights: np.ndarray | None = None,
+        scalarization: str | None = None,
+        y_stats: dict | None = None,
+        rho: float | None = None,
+    ) -> np.ndarray:
+        """Generate a 1-D acquisition landscape over the candidate points.
+
+        Dispatch logic (first match wins):
+
+        1. ``target_variables`` is not None → **joint branch**: scalarize across
+           the listed properties via ``scalarize()``, feed ``(mu_z, sigma_z)``
+           into the standard single-property formula. Requires ``weights`` and
+           ``y_stats``.
+        2. ``target_variable`` is not None → **per-property branch**: call
+           ``ml_model.predict_property()``.
+        3. Both None → **legacy path**: call ``ml_model.predict()`` directly
+           (single-property ``MLModel`` backwards compat).
+
+        For internal callers such as ``batch_highest_landscape`` that invoke
+        this method with no explicit args, all dispatch parameters default to
+        the values stored on the instance at construction time.
 
         Args:
-            X_candidates (np.ndarray): Candidate points for evaluation.
-            ml_model (MLModel): Machine learning model for predictions (trained).
-
-        Raises:
-            ValueError: If the acquisition mode is not supported.
+            X_candidates (np.ndarray): Candidate points.
+            ml_model: Trained model — ``MLModel`` or ``MultiPropertyMLModel``.
+            target_variable (str | None): Single property name (per-property branch).
+            target_variables (list[str] | None): Property names (joint branch).
+            weights (np.ndarray | None): Weight vector for joint scalarization;
+                overrides ``self.weights`` when not None.
+            scalarization (str | None): Scalarization method for joint branch;
+                overrides ``self.scalarization`` when not None.
+            y_stats (dict | None): Per-property ``(y_min, y_max)`` stats;
+                overrides ``self.y_stats`` when not None.
+            rho (float | None): Augmented Chebyshev regularisation coefficient;
+                overrides ``self.rho`` when not None.
 
         Returns:
-            np.ndarray: Acquisition landscape.
+            np.ndarray: 1-D acquisition landscape of length ``len(X_candidates)``.
         """
-        _, mu, sigma = ml_model.predict(X_candidates)
+        # Explicit args take precedence over stored instance attrs.
+        effective_target_variables = target_variables if target_variables is not None else self.target_variables
+        effective_target_variable  = target_variable  if target_variable  is not None else self.target_variable
+        effective_weights          = weights           if weights          is not None else self.weights
+        effective_scalarization    = scalarization     if scalarization    is not None else self.scalarization
+        effective_y_stats          = y_stats           if y_stats          is not None else self.y_stats
+        effective_rho              = rho               if rho              is not None else self.rho
+
+        if effective_target_variables is not None:
+            # Joint branch: scalarize across the requested properties.
+            if effective_weights is None:
+                raise ValueError(
+                    "weights must be provided for joint multi-property acquisition. "
+                    "They are resolved by sampling_block via WeightSampler or a fixed list."
+                )
+            if effective_y_stats is None:
+                raise ValueError(
+                    "y_stats must be provided for joint multi-property acquisition. "
+                    "Call compute_per_property_stats(Y_train, target_names) in sampling_block."
+                )
+            _, mus, sigmas = ml_model.predict(X_candidates)  # (N, P_all)
+            # Slice to the declared target_variables in the declared order.
+            prop_indices = [ml_model.target_names.index(t) for t in effective_target_variables]
+            mus_sub    = mus[:, prop_indices]    # (N, P_sub)
+            sigmas_sub = sigmas[:, prop_indices]  # (N, P_sub)
+            y_min_arr = np.array([effective_y_stats[t][0] for t in effective_target_variables])
+            y_max_arr = np.array([effective_y_stats[t][1] for t in effective_target_variables])
+            mu, sigma = scalarize(
+                mus_sub, sigmas_sub, effective_weights, y_min_arr, y_max_arr,
+                method=effective_scalarization, rho=effective_rho,
+            )
+
+        elif effective_target_variable is not None:
+            # Per-property branch: delegate predict to the named property.
+            _, mu, sigma = ml_model.predict_property(X_candidates, effective_target_variable)
+        else:
+            # Legacy path: single-property MLModel, mu/sigma are 1-D.
+            _, mu, sigma = ml_model.predict(X_candidates)
 
         if self.acquisition_mode == 'upper_confidence_bound':
             return upper_confidence_bound(mu=mu, sigma=sigma, kappa=self.kappa)
-        
+
         elif self.acquisition_mode == 'uncertainty_landscape':
             return uncertainty_landscape(sigma=sigma)
 
         elif self.acquisition_mode == 'expected_improvement':
             return expected_improvement(mu=mu, sigma=sigma, y_best=self.y_best, xi=self.xi)
-        
+
         elif self.acquisition_mode == 'target_expected_improvement':
             return target_expected_improvement(mu=mu, sigma=sigma, y_target=self.y_target, dist=self.dist, epsilon=self.epsilon)
-        
+
         elif self.acquisition_mode == 'percentage_target_expected_improvement':
             return percentage_target_expected_improvement(mu=mu, sigma=sigma, y_best=self.y_best, percentage=self.tei_percentage)
-        
+
         elif self.acquisition_mode == 'exploration_mutual_info':
             try:
                 noise_var = ml_model.model.kernel_.k2.noise_level
@@ -320,6 +570,11 @@ def maximum_predicted_value(mu: np.ndarray) -> np.ndarray:
 
 def landscape_sanity_check(landscape: np.ndarray) -> np.ndarray:
     """Check and adjust the shape of the acquisition landscape.
+
+    Enforces that the landscape reaching the batch selector is always 1-D.
+    Multi-property scalarization must happen *before* this check inside
+    ``landscape_acquisition``; by the time the landscape exits that method it
+    must already be 1-D.
 
     Args:
         landscape (np.ndarray): Input landscape array.

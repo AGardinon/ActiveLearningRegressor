@@ -1,12 +1,24 @@
 #!
 
 import torch
+import inspect
 import numpy as np
 import pandas as pd
 from scipy.stats import qmc
 
 # --------------------------------------------------------------
 # Dataset generation functions
+
+
+def build_function(func_cls, dim, noise_std, negate, **kwargs):
+    sig = inspect.signature(func_cls)
+    init_kwargs = dict(noise_std=noise_std, negate=negate, **kwargs)
+
+    if "dim" in sig.parameters:
+        init_kwargs["dim"] = dim
+
+    return func_cls(**init_kwargs)
+
 
 class DatasetGenerator:
 
@@ -115,7 +127,7 @@ class DatasetGenerator:
             np.ndarray: Computed function values of shape (n_samples,).
         """
         X_tensor = torch.tensor(X, dtype=torch.float32)
-        f = function(dim=self.n_dimensions, noise_std=noise_std, negate=self.negate_y, **kwargs)
+        f = build_function(function, dim=self.n_dimensions, noise_std=noise_std, negate=self.negate_y, **kwargs)
         y = f(X_tensor).numpy()
         return y
 

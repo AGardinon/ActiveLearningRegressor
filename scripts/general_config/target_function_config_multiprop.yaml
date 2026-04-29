@@ -1,0 +1,17 @@
+# ------------------------------------------------------------------------------
+# Target function configuration — BraninCurrin (2D input, 2 objectives)
+# ------------------------------------------------------------------------------
+
+# Function settings
+function_parameters:
+  function: "BraninCurrin"
+
+# Train set configuration (initial pool)
+# val_size is overridden to 1.0 internally when no ground_truth_file is provided,
+# so the script generates pool + validation from the same settings.
+train_set_parameters:
+  n_samples: 2000
+  method: "lhs"
+  val_size: null      # overridden by benchmark_functions.py when gt_file is null
+  negate: true        # negate so EI acquisition maximises (= minimises original objectives)
+  noise_std: 0.0

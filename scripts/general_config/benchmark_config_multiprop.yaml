@@ -4,7 +4,7 @@
 # ------------------------------------------------------------------------------
 SEED: 42
 
-experiment_name: "2D/branincurrin_gpr_parego_20cy_3pts"
+experiment_name: "2D/branincurrin_gpr_parego_12cy_5pts"
 experiment_notes: "Phase 2 ParEGO reference run on BraninCurrin (2D input, 2 objectives)"
 
 # --------------------------------------------------------------
@@ -30,8 +30,8 @@ scaler_params: null
 
 # --------------------------------------------------------------
 # Cycles parameters
-n_cycles: 20
-init_batch_size: 3
+n_cycles: 12
+init_batch_size: 5
 init_sampling: "random"
 
 landscape_penalization: null
@@ -46,9 +46,9 @@ batch_selection:
 # Entry names match the `name:` fields in acquisition_mode_settings_multiprop.yaml
 acquisition_protocol:
   stage_1:
-    cycles: 20
+    cycles: 12
     acquisition_modes: ['explore_y1', 'explore_y2', 'parego_joint']
-    n_points: [1, 1, 1]
+    n_points: [1, 1, 3]
 
 # --------------------------------------------------------------
 # Adaptive refinement: disabled for baseline reference run

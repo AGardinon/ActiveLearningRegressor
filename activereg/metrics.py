@@ -322,6 +322,165 @@ def compute_experiment_scores(
     return scores
 
 
+# --------------------------------------------------------------
+# Multi-property Pareto metrics
+# --------------------------------------------------------------
+
+def compute_pareto_front(Y: np.ndarray, maximize: bool = True) -> np.ndarray:
+    """Return a boolean mask of non-dominated (Pareto-optimal) rows in Y.
+
+    Args:
+        Y: Array of shape (N, P) — N points, P objectives.
+        maximize: If True (default), higher is better for all objectives.
+
+    Returns:
+        Boolean mask of shape (N,) — True where the row is non-dominated.
+    """
+    Y = np.asarray(Y, dtype=float)
+    n = len(Y)
+    is_pareto = np.ones(n, dtype=bool)
+    for i in range(n):
+        if not is_pareto[i]:
+            continue
+        if maximize:
+            dominated = np.all(Y >= Y[i], axis=1) & np.any(Y > Y[i], axis=1)
+        else:
+            dominated = np.all(Y <= Y[i], axis=1) & np.any(Y < Y[i], axis=1)
+        dominated[i] = False
+        if np.any(dominated):
+            is_pareto[i] = False
+    return is_pareto
+
+
+def compute_hypervolume(
+    Y_pareto: np.ndarray,
+    reference_point: np.ndarray,
+) -> float:
+    """Compute the hypervolume indicator for a set of Pareto-front points.
+
+    Closed-form sweep for P=2, O(N log N).
+    Raises NotImplementedError for P > 2 (deferred to Phase 3).
+
+    The hypervolume is the area of the objective-space region dominated by at
+    least one point in Y_pareto and that itself dominates the reference point.
+    For maximization the reference must satisfy r_j < min(Y_pareto[:, j]).
+
+    Args:
+        Y_pareto: Array of shape (N, 2) — non-dominated points only.
+        reference_point: Array of shape (2,) dominated by all Pareto points.
+
+    Returns:
+        Hypervolume indicator as a float.
+    """
+    Y_pareto = np.asarray(Y_pareto, dtype=float)
+    reference_point = np.asarray(reference_point, dtype=float)
+    if Y_pareto.ndim == 1:
+        Y_pareto = Y_pareto.reshape(1, -1)
+    P = Y_pareto.shape[1]
+    if P != 2:
+        raise NotImplementedError(
+            f"compute_hypervolume supports P=2 only (got P={P}). "
+            "P>2 is deferred to Phase 3."
+        )
+    if len(Y_pareto) == 0:
+        return 0.0
+    # Sort by first objective descending; for a maximisation Pareto front
+    # this yields ascending order in the second objective.
+    order = np.argsort(Y_pareto[:, 0])[::-1]
+    Y_s = Y_pareto[order]
+    hv = 0.0
+    prev_y2 = reference_point[1]
+    for pt in Y_s:
+        if pt[0] > reference_point[0] and pt[1] > prev_y2:
+            hv += (pt[0] - reference_point[0]) * (pt[1] - prev_y2)
+            prev_y2 = pt[1]
+    return hv
+
+
+def compute_pareto_attribution(
+    points_df: pd.DataFrame,
+    target_names: List[str],
+    reference_point: np.ndarray,
+    maximize: bool = True,
+) -> pd.DataFrame:
+    """Compute per-acquisition-source attribution of Pareto front contributions.
+
+    For each acquisition source returns:
+    - n_points: total points sampled from that source.
+    - n_pareto_points: points on the *final* Pareto front.
+    - pareto_hit_rate: n_pareto_points / n_points.
+    - total_delta_hv: cumulative marginal HV gain attributed to that source
+      (P=2 only; NaN otherwise).
+    - delta_hv_fraction: total_delta_hv / final_total_hv (P=2 only).
+
+    Points are processed in chronological order (by cycle). Marginal HV gain
+    per point is attributed to the source that added it. Within-cycle ordering
+    follows row order in points_df — marginal attribution within a cycle is
+    order-dependent, which is expected for simultaneous batch acquisitions.
+
+    Args:
+        points_df: train_points_data DataFrame. Required columns:
+                   [*target_names, 'acquisition_source', 'cycle'].
+                   Pass a single-repetition subset when multiple reps exist.
+        target_names: Objective column names, e.g. ['y1', 'y2'].
+        reference_point: Array of shape (P,) for hypervolume computation.
+        maximize: If True (default), higher objective values are better.
+
+    Returns:
+        DataFrame sorted by pareto_hit_rate descending.
+    """
+    P = len(target_names)
+    compute_hv = (P == 2)
+    reference_point = np.asarray(reference_point, dtype=float)
+
+    df = points_df.sort_values('cycle').reset_index(drop=True)
+    Y_all = df[target_names].to_numpy(dtype=float)
+    sources = df['acquisition_source'].values
+
+    current_Y = np.empty((0, P), dtype=float)
+    current_hv = 0.0
+    delta_hv_by_source: Dict[str, float] = {}
+    count_by_source: Dict[str, int] = {}
+
+    for y, source in zip(Y_all, sources):
+        current_Y = np.vstack([current_Y, y.reshape(1, -1)])
+        count_by_source[source] = count_by_source.get(source, 0) + 1
+        if compute_hv:
+            pf = compute_pareto_front(current_Y, maximize=maximize)
+            new_hv = compute_hypervolume(current_Y[pf], reference_point)
+            delta_hv_by_source[source] = (
+                delta_hv_by_source.get(source, 0.0) + new_hv - current_hv
+            )
+            current_hv = new_hv
+
+    pareto_mask = compute_pareto_front(Y_all, maximize=maximize)
+    pareto_hits: Dict[str, int] = {}
+    for on_pareto, source in zip(pareto_mask, sources):
+        if on_pareto:
+            pareto_hits[source] = pareto_hits.get(source, 0) + 1
+
+    rows = []
+    for source in count_by_source:
+        total = count_by_source[source]
+        hits = pareto_hits.get(source, 0)
+        dhv = delta_hv_by_source.get(source, np.nan)
+        rows.append({
+            'acquisition_source': source,
+            'n_points': total,
+            'n_pareto_points': hits,
+            'pareto_hit_rate': hits / total if total > 0 else 0.0,
+            'total_delta_hv': dhv if compute_hv else np.nan,
+            'delta_hv_fraction': (
+                dhv / current_hv
+                if (compute_hv and current_hv > 0) else np.nan
+            ),
+        })
+
+    return pd.DataFrame(rows).sort_values(
+        'pareto_hit_rate', ascending=False
+    ).reset_index(drop=True)
+
+
 def interpolate_simple_metric(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     value_col: str,

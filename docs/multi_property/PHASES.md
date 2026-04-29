@@ -387,15 +387,60 @@ to published results, ideal for validating the full pipeline before scaling up:
 - `scripts/general_config/target_function_config_multiprop.yaml`
   referencing `DTLZ2_2obj_4D`.
 
-### P2.8 — Reference run `[ ]`
+### P2.8a — Multi-property metric utilities in `metrics.py` `[x]`
 
-- Run the worked-example config for ~15-20 cycles.
-- Produce a scatter of the Pareto front on the benchmark to
-  visually verify ParEGO is sweeping trade-offs (not collapsing to
-  one corner).
-- Archive the run and the plot under
-  `insilico_al/reference_runs/multi_property_parego/` for future
-  regression comparison.
+- `compute_pareto_front(Y: np.ndarray, maximize: bool=True) -> np.ndarray`
+  Returns a boolean mask (N,) of non-dominated rows in an (N, P) array.
+- `compute_hypervolume(Y_pareto: np.ndarray, reference_point: np.ndarray) -> float`
+  P=2 closed-form (O(N log N)); raise `NotImplementedError` for P>2 with a clear
+  message pointing to Phase 3.
+- `compute_pareto_attribution(points_df: pd.DataFrame, target_names: list[str],
+  reference_point: np.ndarray) -> pd.DataFrame`
+  For each acquisition source: number of final-Pareto-front points, hit rate
+  (Pareto points / total points), and total marginal ΔHV contributed.
+  Processes points in chronological order (cumulative sample index) to assign ΔHV.
+
+### P2.8b — Multi-property plotting functions in `beauty.py` `[x]`
+
+Add under a new `# --- PLOT FUNC MULTI-PROPERTY` section. All functions follow the
+existing `Dict[str, Tuple[points_df, metrics_df]]` contract.
+
+- `plot_objective_space(experiments, target_names, pool_df=None,
+  color_by="cumulative_index", filter_acquisitions=None, ...)`
+  Scatter in objective space. Pool as optional gray background. Sampled points
+  colored by `color_by` ("cumulative_index", "cycle", or "acquisition_source").
+  Pareto front of sampled points highlighted. Dispatches on P: 2D scatter (P=2),
+  pairwise grid (P≥3).
+- `plot_hypervolume_over_time(experiments, target_names, reference_point,
+  x_axis="samples", filter_acquisitions=None, ...)`
+  Hypervolume of running Pareto front vs cumulative samples (or cycles).
+  x_axis="samples" for fair cross-experiment comparison across batch sizes.
+  Calls `compute_hypervolume` at each step from `train_points_data`.
+- `plot_per_property_best_over_time(experiments, target_names, ...)`
+  Multi-line plot of `y_best_{name}` columns from `benchmark_data.csv`, one line
+  per property. Analog of `plot_best_value_over_time` for multi-property.
+- `plot_weight_distribution(experiments, joint_entry_name, ...)`
+  Scatter of Dirichlet-sampled (w1, w2) pairs from `resolved_weights_{entry}` column.
+  Shows weight diversity over the run. 2D simplex scatter for P=2; per-weight
+  histograms otherwise.
+- `plot_pareto_hit_rate(experiments, target_names, ...)`
+  Grouped bar chart: Pareto hit rate per acquisition source per experiment.
+  Answers "per point spent, which strategy most efficiently finds Pareto points?"
+- `plot_hv_gain_attribution(experiments, target_names, reference_point, ...)`
+  Stacked area of cumulative HV gain over samples, colored by acquisition source.
+  Multi-property analog of `analyze_acquisition_source_distribution`.
+  Answers "which strategy drove actual Pareto front expansion?"
+
+### P2.8c — Test notebook `[x]`
+
+- Create `benchmarks/2D/results_multiprop.ipynb`.
+- Load both completed runs (`branincurrin_gpr_parego_20cy_1pts`,
+  `branincurrin_gpr_parego_20cy_5pts`) and the pool CSV.
+- Exercise all six plotting functions and both metric utilities.
+- Visual verification: `plot_objective_space` must show spread along the Pareto
+  front (not clustering at one corner) — this is the core P2.8 validation criterion.
+- Note: folder reorganisation and `beauty.py` package split are deferred to after
+  this notebook confirms all functions work correctly.
 
 ### Phase 2 validation criteria
 

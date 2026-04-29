@@ -1,7 +1,7 @@
 # Multi-Property Optimization — State Tracker
 
 **Branch:** `feature/multi-properties-optimization`
-**Last updated:** 2026-04-08
+**Last updated:** 2026-04-29
 
 This is the "what's happening right now" file. Unlike `DESIGN.md` (stable
 architectural decisions) and `PHASES.md` (step-by-step plan with
@@ -12,7 +12,7 @@ a work session starts or ends, even if nothing got finished.
 
 ## Current status
 
-**Phase:** Phase 2 in progress — P1 complete; P2.1–P2.7b done; P2.8 next (reference run).
+**Phase:** Phase 2 complete — P1 and P2 done. Phase 3 (EHVI) is optional; next work is folder/README cleanup deferred from P2.
 
 **What has been done so far:**
 
@@ -40,16 +40,32 @@ a work session starts or ends, even if nothing got finished.
 
 **Next concrete action when work resumes:**
 
-**P2.8** — Reference run: run the BraninCurrin ParEGO config for ~20 cycles, produce a
-Pareto front scatter plot, archive under `insilico_al/reference_runs/multi_property_parego/`.
-See PHASES.md §P2.8. Command:
-```
-python scripts/benchmark_functions.py \
-  -bc scripts/general_config/benchmark_config_multiprop.yaml \
-  -mc scripts/mlmodel_config/gpr_config.yaml \
-  -acqmodes scripts/general_config/acquisition_mode_settings_multiprop.yaml \
-  -tfc scripts/general_config/target_function_config_multiprop.yaml
-```
+Deferred cleanup items (do in any order, no blocking dependencies):
+1. **Folder/README reorganisation** — `benchmarks/` structure, README pointing to wrong script.
+2. **`beauty.py` package split** — once test notebook validates new functions (done).
+3. **Phase 3 (EHVI)** — only if ParEGO coverage proves insufficient in real experiments.
+
+**Completed this session (P2.8a–b):**
+
+**P2.8a** — Implement multi-property metric utilities in `activereg/metrics.py`:
+- `compute_pareto_front(Y, maximize=True) -> np.ndarray` (bool mask, (N,P)→(N,))
+- `compute_hypervolume(Y_pareto, reference_point) -> float` (P=2 closed-form; P>2 stub)
+- `compute_pareto_attribution(points_df, target_names) -> pd.DataFrame` (hit rate + ΔHV per source)
+
+**P2.8b** — Add multi-property plotting functions to `activereg/beauty.py` under a new
+`# --- PLOT FUNC MULTI-PROPERTY` section:
+- `plot_objective_space(experiments, target_names, pool_df, color_by, filter_acquisitions)`
+- `plot_hypervolume_over_time(experiments, target_names, reference_point, x_axis, filter_acquisitions)`
+- `plot_per_property_best_over_time(experiments, target_names)`
+- `plot_weight_distribution(experiments, joint_entry_name)`
+- `plot_pareto_hit_rate(experiments, target_names)`
+- `plot_hv_gain_attribution(experiments, target_names, reference_point)`
+
+**P2.8c** — Test notebook in `benchmarks/2D/` using the two completed reference runs
+(`branincurrin_gpr_parego_20cy_1pts` and `branincurrin_gpr_parego_20cy_5pts`).
+
+Note: folder reorganisation (`benchmarks/` vs `insilico_al/reference_runs/`) and `beauty.py`
+package split are both deferred to after the test notebook validates the new functions.
 
 **After P2.6 — multi-objective function suite (P2.7a before P2.7b):**
 
@@ -218,6 +234,69 @@ re-verified against the current codebase in a single session. Worth a
     Config loads, `validate_acquisition_params` passes, protocol dispatches correctly
     to all 3 named entries (`explore_y1`, `explore_y2`, `parego_joint`) across all
     20 cycles.
+- **2026-04-29** — P2.8 planning session. Key outcomes:
+  - `data.py::build_function` fix landed in commit `efad340`: uses `inspect.signature`
+    to skip `dim` kwarg for hardcoded-dim functions (e.g. `BraninCurrin`). Pipeline
+    confirmed working end-to-end.
+  - Two reference runs exist in `benchmarks/2D/`:
+    - `branincurrin_gpr_parego_20cy_1pts` — pre-Phase-2 smoke test (single EI entry).
+    - `branincurrin_gpr_parego_20cy_5pts` — full multi-property ParEGO run with all
+      three entries (`explore_y1`, `explore_y2`, `parego_joint`), 20 cycles, 5 pts/cycle
+      (1+1+3), 105 total points. This is the validated reference run.
+  - `benchmark_config_multiprop.yaml` now points to `"2D/branincurrin_gpr_parego_20cy_3pts"`
+    (1+1+1 pts/cycle, not yet run). Serves as the clean minimal reference config.
+  - Benchmark output location: `benchmarks/` (experiments), `benchmarks/2D/` (2D runs).
+    `insilico_al/reference_runs/` archive location from earlier STATE.md is superseded;
+    reorganisation is deferred.
+  - Planned P2.8 function inventory (see "Next concrete action" above). Key design
+    decisions settled in this session:
+    - `compute_pareto_front` and `compute_hypervolume` → `metrics.py`; plots → `beauty.py`.
+    - Pareto front always computed from ALL sampled points (D2: observations complete).
+      `filter_acquisitions` optional arg for per-source diagnostic.
+    - `plot_hypervolume_over_time` x-axis = cumulative samples (not cycles) for
+      fair cross-experiment comparison across different batch sizes.
+    - Two attribution metrics: Pareto hit rate (precision per source) + marginal HV
+      gain by source (impact-weighted). Together they answer "who found Pareto points
+      and did those points actually expand the front?"
+    - `plot_objective_space` dispatches on P: 2D scatter (P=2), pairwise grid (P≥3).
+    - `compute_hypervolume`: P=2 closed-form now; P>2 stub with NotImplementedError.
+    - `beauty.py` package split deferred to after test notebook validates new functions.
+  - **P2.8a** — `compute_pareto_front`, `compute_hypervolume` (P=2 closed-form, P>2 stub),
+    `compute_pareto_attribution` added to `activereg/metrics.py`.
+    Verified on 5pts run: 3/105 sampled points on final Pareto front (correct); HV
+    coverage 71.9% of pool true front; attribution shows EI/parego_joint at 55% of
+    total HV gain and highest hit rate (5%), exploration (UL) at 25%, random init at 20%.
+  - **P2.8b** — Six multi-property plotting functions added to `activereg/beauty.py`
+    under `# --- PLOT FUNC MULTI-PROPERTY` section: `plot_objective_space`,
+    `plot_hypervolume_over_time`, `plot_per_property_best_over_time`,
+    `plot_weight_distribution`, `plot_pareto_hit_rate`, `plot_hv_gain_attribution`.
+    All six smoke-tested against the 5pts reference run without errors.
+  - **P2.8c** — `benchmarks/2D/results_multiprop.ipynb` created. 20 cells, 6 sections.
+    Runs were initially generated with `negate=False` (wrong direction for BraninCurrin).
+    All three re-run with `negate=True` and equal AL budget (60 pts each), folder names
+    updated to reflect cycles: `60cy_1pts`, `20cy_3pts`, `12cy_5pts`.
+    Notebook updated to load all three. All cells dry-run without errors.
+    Key results (negate=True, 60 AL pts each):
+    - batch=1 · 60cy (pure ParEGO): EI hit rate 13%, HV coverage 84%.
+    - batch=3 · 20cy (explore+ParEGO): HV coverage 93.5% — best of three.
+    - batch=5 · 12cy (explore+ParEGO): EI hit rate 19%, HV coverage 90.3%.
+    Random init HV fraction is artificially high (38–75%) due to small init sizes;
+    will stabilise with more cycles / repetitions.
+    Phase 2 is complete.
+  - **P2.8 refinements (same session, continued)** — Four additions to the
+    multi-property plotting functions after first notebook run:
+    - `plot_objective_space`: `acronym_map` param (default `ACQFUNC_ACRONYMS`),
+      applied to source labels when `color_by='acquisition_source'`.
+    - `plot_hypervolume_over_time`: `exclude_init: bool = False` — filters
+      `cycle > 0` before building HV curves when True.
+    - `plot_per_property_best_over_time`: `ceiling_values: Optional[Dict[str,float]]`
+      — draws a gray dashed "Pool max" `axhline` per property when provided.
+    - `plot_pareto_hit_rate`, `plot_hv_gain_attribution`: `exclude_init` and
+      `acronym_map` params; init-cycle filtering and acronym labels now consistent.
+    - Notebook updated: `pool_max` computed in ref-point cell; all attribution /
+      HV functions called with `exclude_init=True`; `ceiling_values=pool_max`
+      passed to `plot_per_property_best_over_time`; attribution summary cell
+      filters `pts[pts['cycle'] > 0]`.
 
 ---
 

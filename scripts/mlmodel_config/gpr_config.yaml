@@ -13,5 +13,5 @@ model_parameters:
   log_transform: false
 
 grid_search:
-  perform_grid_search: true
+  perform_grid_search: false
   every_n_points: 20  # Perform grid search every N acquired points

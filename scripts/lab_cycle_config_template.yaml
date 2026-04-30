@@ -1,0 +1,85 @@
+# ------------------------------------------------------------------------------
+# Configuration template for run_lab_cycle.py
+# Copy this file, fill in your values, and pass it with -c <config.yaml>
+# ------------------------------------------------------------------------------
+
+experiment_name: "my_lab_experiment"
+experiment_notes: ""
+
+# Where to store experiment outputs.  null → LAB_AL_REPO (activereg/format.py).
+# Override with an absolute path to write elsewhere.
+output_dir: null
+
+# ------------------------------------------------------------------------------
+# Search space and targets
+# ------------------------------------------------------------------------------
+search_space_variables:
+  - "x1"
+  - "x2"
+  - "x3"
+
+target_variables:
+  - "y"
+
+# ------------------------------------------------------------------------------
+# Data files
+#   pool_file              : CSV of your full search space (features only).
+#                            Provide an absolute path or a path relative to CWD.
+#                            For in-silico mode you may leave this null and use
+#                            ground_truth_file instead.
+#   initial_evidence_file  : Optional CSV of pre-measured points (features + targets).
+#                            If provided, the first AL cycle runs immediately on
+#                            cycle 0; otherwise cycle 0 does initial sampling.
+#   ground_truth_file      : Optional CSV with true target values for every pool point.
+#                            When set, validated.csv is filled automatically each
+#                            cycle (in-silico simulation mode).
+# ------------------------------------------------------------------------------
+pool_file: null
+initial_evidence_file: null
+ground_truth_file: null
+
+# ------------------------------------------------------------------------------
+# Cycle 0 initial sampling (only used when initial_evidence_file is null)
+# ------------------------------------------------------------------------------
+init_batch_size: 8
+init_sampling: "fps"        # fps | voronoi | random
+
+# ------------------------------------------------------------------------------
+# Data scaling
+# ------------------------------------------------------------------------------
+data_scaler: "StandardScaler"   # StandardScaler | MinMaxScaler
+
+# ------------------------------------------------------------------------------
+# ML model
+# ------------------------------------------------------------------------------
+ml_model: "GPR"
+model_parameters:
+  kernel: "MATERN_W"
+  n_restarts_optimizer: 20
+  alpha: 1.0e-10
+  normalize_y: true
+
+# ------------------------------------------------------------------------------
+# Batch selection
+# ------------------------------------------------------------------------------
+batch_selection_method: "highest_landscape"
+batch_selection_params:
+  percentile: 95
+  sampling_method: "voronoi"
+
+# ------------------------------------------------------------------------------
+# Landscape penalization (null to disable)
+# ------------------------------------------------------------------------------
+penalization_params:
+  radius: 0.25
+  strength: 1.0
+
+# ------------------------------------------------------------------------------
+# Acquisition functions
+# Each entry must have acquisition_mode and n_points.
+# Use target_variable to target a single property; omit for single-property runs.
+# ------------------------------------------------------------------------------
+acquisition_parameters:
+  - acquisition_mode: "expected_improvement"
+    n_points: 5
+    xi: 0.01

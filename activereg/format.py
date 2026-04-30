@@ -10,4 +10,5 @@ EXAMPLES_REPO = REPO_ROOT / 'examples'
 BENCHMARKS_REPO = REPO_ROOT / 'benchmarks'
 INSILICO_AL_REPO = REPO_ROOT / 'insilico_al'
 EXPERIMENTS_REPO = REPO_ROOT / 'experiments'
+LAB_AL_REPO = REPO_ROOT / 'lab_al_experiments'
 

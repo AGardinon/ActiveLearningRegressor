@@ -12,6 +12,7 @@ Active learning reduces labeling cost by iteratively selecting the most informat
 - [Package Structure](#package-structure)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Lab Use](#lab-use)
 - [ML Models](#ml-models)
 - [Acquisition Functions](#acquisition-functions)
 - [Sampling Strategies](#sampling-strategies)
@@ -62,9 +63,8 @@ activereg/
 ├── adaptiveRefinement.py   # Adaptive spatial refinement strategies
 ├── benchmarkFunctions.py   # Benchmark test functions (Hartmann, Ackley, …)
 ├── beauty.py               # Visualization utilities
-├── cycle.py                # Active learning cycle orchestration
 ├── data.py                 # Dataset generation (LHS, Sobol, random)
-├── experiment.py           # Experiment setup and model factory
+├── experiment.py           # Experiment setup, model factory, and AL cycle core
 ├── hyperparams.py          # Hyperparameter grids and grid search utilities
 ├── metrics.py              # Evaluation metrics (RMSE, NLL, PICP, MPIW, …)
 ├── sampling.py             # Sampling methods (FPS, Voronoi, random)
@@ -110,45 +110,105 @@ The default install pulls the CPU-only PyTorch wheel. For a CUDA build, install 
 ```python
 import numpy as np
 import pandas as pd
-from activereg.experiment import setup_ml_model, setup_data_pool
-from activereg.cycle import lab_al_cycle
-from activereg.acquisition import AcquisitionFunction
+from sklearn.preprocessing import StandardScaler
+from activereg.experiment import (
+    setup_multi_property_ml_model,
+    setup_data_pool,
+    run_single_al_cycle,
+)
 
 # --- data ---
-# gt_df: ground-truth DataFrame with features + target column
-# evidence_df: initial labeled samples
-gt_df = pd.read_csv("datasets/my_experiment.csv")
-evidence_df = gt_df.sample(5, random_state=0)
+# pool_df: search space (features only)
+# evidence_df: initial labeled samples (features + targets)
+pool_df     = pd.read_csv("datasets/my_pool.csv")
+evidence_df = pd.read_csv("datasets/my_evidence.csv")
 
-feature_cols = ["x1", "x2", "x3"]
-target_col   = "y"
+search_vars = ["x1", "x2", "x3"]
+target_vars = ["y"]
 
-# --- model ---
-model_params = {"kernel": "matern", "nu": 2.5, "n_restarts": 5}
-model = setup_ml_model("GPR", model_params)
+# --- scaler: fit once on the full pool, reuse every cycle ---
+scaler = StandardScaler()
+_, scaler = setup_data_pool(df=pool_df, search_var=search_vars, scaler=scaler)
 
-# --- pool ---
-X_pool, scaler = setup_data_pool(gt_df[feature_cols].values)
-
-# --- acquisition ---
-acq = AcquisitionFunction(mode="UCB", kappa=2.0)
+# --- model config ---
+config = {
+    "ml_model": "GPR",
+    "model_parameters": {"kernel": "MATERN_W", "n_restarts_optimizer": 10, "alpha": 1e-10},
+}
+acquisition_params = [{"acquisition_mode": "expected_improvement", "n_points": 5, "xi": 0.01}]
 
 # --- active learning cycle ---
 for cycle in range(10):
-    X_train = evidence_df[feature_cols].values
-    y_train = evidence_df[target_col].values
-
-    new_batch = lab_al_cycle(
-        model=model,
-        X_train=X_train,
-        y_train=y_train,
-        X_pool=X_pool,
-        acq=acq,
-        batch_size=3,
+    model = setup_multi_property_ml_model(config, target_vars)
+    result = run_single_al_cycle(
+        pool_df=pool_df,
+        evidence_df=evidence_df,
         scaler=scaler,
+        ml_model=model,
+        search_vars=search_vars,
+        target_vars=target_vars,
+        acquisition_params=acquisition_params,
+        batch_selection_method="highest_landscape",
+        batch_selection_params={"percentile": 95, "sampling_method": "voronoi"},
     )
-    evidence_df = pd.concat([evidence_df, gt_df.loc[new_batch]])
-    print(f"Cycle {cycle+1}: {len(evidence_df)} labeled points")
+    # next_batch_df contains the selected candidates with NaN targets
+    # measure them and add to evidence_df for the next cycle
+    new_points = result["next_batch_df"]
+    print(f"Cycle {cycle+1}: selected {len(new_points)} candidates")
+    # evidence_df = pd.concat([evidence_df, measured_points])
+```
+
+---
+
+## Lab Use
+
+`activereg` provides two additional workflows for experiments that cannot be run as a single automated benchmark.
+
+### Real-lab single-cycle workflow
+
+One AL step at a time, with physical measurement between cycles:
+
+```
+Cycle 0: python scripts/run_lab_cycle.py -c config.yaml
+         → writes cycle_0/output_sampled.csv
+              (fill in measured values → cycle_0/validated.csv)
+Cycle 1: python scripts/run_lab_cycle.py -c config.yaml
+         → reads validated.csv, updates evidence, writes cycle_1/output_sampled.csv
+         ...
+```
+
+**Folder layout** created automatically on the first run:
+
+```
+lab_al_experiments/{experiment_name}/
+  dataset/
+    POOL.csv          # immutable: full search space (features only)
+    EVIDENCE.csv      # grows each cycle (features + targets)
+    CANDIDATES.csv    # shrinks each cycle (features only)
+    scaler.joblib     # fit once on POOL
+  cycle_0/
+    output_sampled.csv   # points to measure (targets = NaN)
+    predictions.csv      # model predictions over pool
+    landscapes.csv       # acquisition landscape per entry
+    model_snapshot.pkl
+    log.json
+    validated.csv        # fill in measurements, then re-run
+  cycle_1/
+    ...
+```
+
+Copy and edit `scripts/lab_cycle_config_template.yaml` to configure your experiment.
+
+### In-silico simulation
+
+Set `ground_truth_file` in the config to run the full multi-cycle loop automatically — the script looks up target values from the CSV after each cycle, so no manual measurement step is needed:
+
+```yaml
+ground_truth_file: "ackley3d_10000pts.csv"   # in datasets/
+```
+
+```bash
+python scripts/insilico_lab_al_simulation.py -c scripts/insilico_lab_al_simulation_config.yaml
 ```
 
 ---
@@ -234,28 +294,30 @@ scripts/
 │   ├── benchmark_config.yaml          # experiment-level settings
 │   ├── acquisition_mode_settings.yaml # acquisition function parameters
 │   └── target_function_config.yaml    # benchmark function / dataset settings
-└── mlmodel_config/
-    └── model_config.yaml              # ML model type and hyperparameters
+├── mlmodel_config/
+│   └── model_config.yaml              # ML model type and hyperparameters
+└── lab_cycle_config_template.yaml     # template for run_lab_cycle.py
 ```
 
-Example `model_config.yaml`:
+Key configuration fields shared across benchmark and lab scripts:
 
 ```yaml
-ml_model_type: GPR
-ml_model_params:
-  kernel: matern
-  nu: 2.5
-  n_restarts: 5
-  alpha: 1.0e-6
-```
+ml_model: "GPR"
+model_parameters:
+  kernel: "MATERN_W"          # kernel recipe; see hyperparams.py
+  n_restarts_optimizer: 20
+  alpha: 1.0e-10
+  normalize_y: true
 
-Example `acquisition_mode_settings.yaml`:
+batch_selection_method: "highest_landscape"   # highest_landscape | constant_liar | …
+batch_selection_params:
+  percentile: 95
+  sampling_method: "voronoi"  # voronoi | fps | random
 
-```yaml
-mode: UCB
-kappa: 2.0
-batch_size: 5
-sampling_method: fps
+acquisition_parameters:
+  - acquisition_mode: "expected_improvement"
+    n_points: 5
+    xi: 0.01
 ```
 
 ---

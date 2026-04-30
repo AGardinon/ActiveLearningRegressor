@@ -16,24 +16,26 @@ init_batch_size: 5
 n_cycles: 19
 
 init_sampling: "voronoi"
-cycle_sampling: "voronoi"
 
 # ML model configuration (GPR)
 # Kernel configuration for GPR
 # either "RBF_W" or "MATERN_W" or custom recipe
 ml_model: "GPR"
-kernel_recipe: "MATERN_W"
-
-# Additional paramters
 model_parameters:
+  kernel: "MATERN_W"
   n_restarts_optimizer: 300
   alpha: 1e-10
   normalize_y: true
   optimizer: 'fmin_l_bfgs_b'
-  use_gridsearch: false
   log_transform: false
 
 data_scaler: "StandardScaler"
+
+# Batch selection strategy
+batch_selection_method: "highest_landscape"
+batch_selection_params:
+  percentile: 95
+  sampling_method: "voronoi"
 
 # List of acquisition parameters functions to be used in the simulation
 acquisition_parameters:

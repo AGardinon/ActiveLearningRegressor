@@ -798,3 +798,124 @@ class AcquisitionParametersGenerator:
             return self._protocol_params_for_cycle(cycle)
         else:
             return self.acquisition_params
+
+
+def prepare_training_data(
+    pool_df: pd.DataFrame,
+    evidence_df: pd.DataFrame,
+    search_vars: list[str],
+    target_vars: list[str],
+    scaler: BaseEstimator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, pd.DataFrame]:
+    """Derive training arrays and candidate pool from pool and evidence DataFrames.
+
+    Args:
+        pool_df: Full search space (features only).
+        evidence_df: Labeled points so far (features + targets).
+        search_vars: Feature column names.
+        target_vars: Target column names.
+        scaler: Pre-fit scaler; used for transform only (never re-fit here).
+
+    Returns:
+        X_train: Scaled training features, shape (N, d).
+        Y_train: Training targets, shape (N, P).
+        X_candidates: Scaled candidate features, shape (M, d).
+        candidates_df: Pool minus evidence (features only), shape (M, d).
+    """
+    candidates_df = remove_evidence_from_gt(pool_df, evidence_df, search_vars)
+
+    X_train = scaler.transform(evidence_df[search_vars].to_numpy())
+    Y_train = evidence_df[target_vars].to_numpy()   # (N, P)
+    X_candidates = scaler.transform(candidates_df[search_vars].to_numpy())
+
+    return X_train, Y_train, X_candidates, candidates_df
+
+
+def run_single_al_cycle(
+    pool_df: pd.DataFrame,
+    evidence_df: pd.DataFrame,
+    scaler: BaseEstimator,
+    ml_model: regmodels.IndependentMultiPropertyModel,
+    search_vars: list[str],
+    target_vars: list[str],
+    acquisition_params: list[dict],
+    batch_selection_method: str,
+    batch_selection_params: dict,
+    penalization_params: tuple[float, float] | None = (0.25, 1.0),
+    rng: np.random.Generator | None = None,
+) -> dict:
+    """Execute one complete AL cycle: train, predict, sample, return results.
+
+    The scaler must already be fit on the full pool; it is never re-fit here.
+    The model is trained from scratch on the current evidence each call.
+
+    Args:
+        pool_df: Full search space (features only).
+        evidence_df: Labeled points accumulated so far (features + targets).
+        scaler: Pre-fit scaler instance (fit once on pool by the caller).
+        ml_model: Untrained multi-property model; trained inside this call.
+        search_vars: Feature column names.
+        target_vars: Target column names.
+        acquisition_params: Per-entry acquisition dicts (passed to sampling_block).
+        batch_selection_method: Batch selection strategy name.
+        batch_selection_params: Parameters for the batch selection strategy.
+        penalization_params: (radius, strength) for landscape penalization, or None.
+        rng: Random generator for reproducible weight sampling in joint entries.
+
+    Returns:
+        dict with keys:
+            next_batch_df   — selected candidates with NaN targets, shape (B, d+P)
+            trained_model   — model after training on evidence
+            y_pred          — mean predictions over full pool, shape (N_pool, P)
+            y_unc           — uncertainty over full pool, shape (N_pool, P)
+            landscapes      — acquisition landscapes, shape (n_entries, M_candidates)
+            y_best          — per-property best observed value {target: float}
+            sampled_idx     — indices into candidates_df selected this cycle
+            candidates_df   — pool minus evidence at this cycle (features only)
+            meta            — per-entry metadata from sampling_block
+    """
+    X_train, Y_train, X_candidates, candidates_df = prepare_training_data(
+        pool_df=pool_df,
+        evidence_df=evidence_df,
+        search_vars=search_vars,
+        target_vars=target_vars,
+        scaler=scaler,
+    )
+
+    ml_model.train(X_train, Y_train)
+
+    X_pool = scaler.transform(pool_df[search_vars].to_numpy())
+    _, y_pred, y_unc = ml_model.predict(X_pool)
+
+    sampled_idx, landscapes, meta = sampling_block(
+        X_candidates=X_candidates,
+        X_train=X_train,
+        Y_train=Y_train,
+        ml_model=ml_model,
+        acquisition_params=acquisition_params,
+        batch_selection_method=batch_selection_method,
+        batch_selection_params=batch_selection_params,
+        penalization_params=penalization_params,
+        rng=rng,
+    )
+
+    next_batch_df = candidates_df.iloc[sampled_idx].copy()
+    for target in target_vars:
+        next_batch_df[target] = np.nan
+
+    y_best = {
+        target: float(np.max(evidence_df[target].values))
+        for target in target_vars
+    }
+
+    return {
+        'next_batch_df': next_batch_df,
+        'trained_model': ml_model,
+        'y_pred': y_pred,
+        'y_unc': y_unc,
+        'landscapes': landscapes,
+        'y_best': y_best,
+        'sampled_idx': sampled_idx,
+        'candidates_df': candidates_df,
+        'meta': meta,
+    }

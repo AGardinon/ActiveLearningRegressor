@@ -17,9 +17,10 @@ from typing import List, Tuple
 from activereg.utils import save_to_json
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
-from activereg.experiment import (sampling_block, 
-                                  setup_ml_model, 
-                                  validation_block, 
+from activereg.experiment import (sampling_block,
+                                  setup_multi_property_ml_model,
+                                  AcquisitionParametersGenerator,
+                                  validation_block,
                                   setup_data_pool,
                                   get_gt_dataframes,
                                   remove_evidence_from_gt,
@@ -70,7 +71,7 @@ def create_insilico_al_experiment_paths(
     pool_df = pool_dataframe[search_space_variables]
     pool_df.to_csv(pool_csv_path, index=False)
 
-    candidates_df = remove_evidence_from_gt(pool_df, evidence_df, search_space_variables)
+    candidates_df = remove_evidence_from_gt(pool_df, evidence_dataframe, search_space_variables)
     candidates_df.to_csv(candidates_csv_path, index=False)
 
     if evidence_dataframe is not None:
@@ -93,20 +94,32 @@ if __name__ == '__main__':
 
     # Extracting parameters from the config file &
     # setting the parameters for the experiment
-    (EXP_NAME, 
-     ADDITIONAL_NOTES, 
-     N_CYCLES, 
-     INIT_BATCH, 
-     INIT_SAMPLING, 
-     CYCLE_SAMPLING, 
-     ACQUI_PARAMS,
+    (EXP_NAME,
+     ADDITIONAL_NOTES,
+     N_CYCLES,
+     INIT_BATCH,
+     INIT_SAMPLING,
      SEARCH_VAR,
      TARGET_VAR) = setup_experiment_variables(config)
-    
-    N_BATCH = sum(acp['n_points'] for acp in ACQUI_PARAMS)
+
+    ACQUI_PARAMS     = config.get('acquisition_parameters', [])
+    ACQ_PROTOCOL     = config.get('acquisition_protocol', {})
+    BATCH_SEL_METHOD = config.get('batch_selection_method', 'highest_landscape')
+    BATCH_SEL_PARAMS = config.get('batch_selection_params') or {}
+
+    pen_cfg      = config.get('landscape_penalization') or {}
+    PENALIZATION = (float(pen_cfg['radius']), float(pen_cfg['strength'])) if pen_cfg else None
+
+    acq_generator = AcquisitionParametersGenerator(
+        acquisition_params=ACQUI_PARAMS,
+        acquisition_protocol=ACQ_PROTOCOL,
+    )
 
     # Get ground truth and evidence dataframes
-    gt_df, evidence_df = get_gt_dataframes(config)
+    gt_df, evidence_df = get_gt_dataframes(
+        ground_truth_file=config.get('ground_truth_file'),
+        experiment_evidence_file=config.get('experiment_evidence'),
+    )
 
     # Paths for the experiment
     INSILICO_AL_PATH, POOL_CSV_PATH, CANDIDATES_CSV_PATH, TRAIN_CSV_PATH = create_insilico_al_experiment_paths(
@@ -121,16 +134,21 @@ if __name__ == '__main__':
     scaler_path = INSILICO_AL_PATH / DATASET_PATH_NAME / 'scaler.joblib'
     pool_df = pd.read_csv(POOL_CSV_PATH)
 
-    data_scaler_type = config.get('data_scaler', None)
-    if data_scaler_type is None:
-        print("Data scaler type not specified in config file. Using StandardScaler as default.")
-        data_scaler_type = "StandardScaler"
+    from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
-    X_pool, scaler = setup_data_pool(df=pool_df, search_var=SEARCH_VAR, scaler=data_scaler_type)
+    data_scaler_type = config.get('data_scaler', 'StandardScaler')
+    if data_scaler_type == 'StandardScaler':
+        scaler_instance = StandardScaler()
+    elif data_scaler_type == 'MinMaxScaler':
+        scaler_instance = MinMaxScaler()
+    else:
+        raise ValueError(f"Unsupported data_scaler: {data_scaler_type!r}")
+
+    X_pool, scaler = setup_data_pool(df=pool_df, search_var=SEARCH_VAR, scaler=scaler_instance)
     joblib.dump(scaler, scaler_path)
 
     # Set up the model
-    ML_MODEL = setup_ml_model(config)
+    ML_MODEL = setup_multi_property_ml_model(config, TARGET_VAR)
 
     print('# ----------------------------------------------------------------------------\n'\
           f'# \tExperiment: {EXP_NAME} \t\n'\
@@ -141,7 +159,7 @@ if __name__ == '__main__':
     # AL cycles    
     for cycle in range(N_CYCLES):
 
-        print(f'\n# Cycle {cycle+1} of {N_CYCLES} - Sampling {N_BATCH} points')
+        print(f'\n# Cycle {cycle+1} of {N_CYCLES}')
 
         # Candidates are the pool of points availalble for sampling at the current cycle
         # For cycle 0, candidates are the whole pool and for the next cycles, 
@@ -190,10 +208,10 @@ if __name__ == '__main__':
             cycle_0_log_dict = {
                 'cycle' : cycle,
                 'init_sampling_mode' : INIT_SAMPLING,
-                'n_points' : N_BATCH,
+                'n_points' : INIT_BATCH,
                 'screened_indexes' : np.array(screened_indexes).astype(int).tolist(),
-                'candidates_df_shape' : candidates_df.shape,
-                'train_df_shape' : train_df.shape,
+                'candidates_df_shape' : list(candidates_df.shape),
+                'train_df_shape' : list(train_df.shape),
             }
             save_to_json(
                 dictionary=cycle_0_log_dict,
@@ -206,67 +224,69 @@ if __name__ == '__main__':
         # -------------------------------------- #
         # --- INIT of cycle > 0
         if cycle > 0:
-            
+
             # Prepare candidates and training data
             candidates_df = candidates_df.reset_index(drop=True)
             train_df = train_df.reset_index(drop=True)
             X_candidates = scaler.transform(candidates_df[SEARCH_VAR].to_numpy())
-            y_train = train_df[TARGET_VAR].to_numpy()
+            Y_train = train_df[TARGET_VAR].to_numpy()  # 2-D: (N, P)
             X_train = scaler.transform(train_df[SEARCH_VAR].to_numpy())
 
             print(f'Cycle {cycle} - Candidates shape: {X_candidates.shape}, Training shape: {X_train.shape}')
 
-            # Compute the best target value from the training set
-            y_best = max(y_train).item()
-
-            # Train model on evidence and predict on pool to generate
-            # the outputs per cycle
-            ML_MODEL.train(X_train, y_train)
+            # Train model on evidence and predict on pool
+            ML_MODEL.train(X_train, Y_train)
             _, y_pred, y_unc = ML_MODEL.predict(X_pool)
 
+            # Get acquisition params for this cycle via the protocol generator
+            cycle_acqui_params = acq_generator.get_params_for_cycle(cycle - 1)
+            N_BATCH = sum(acp['n_points'] for acp in cycle_acqui_params)
+
             # Sample new points from candidates based on the acquisition function
-            screened_indexes, landscape = sampling_block(
-                X_candidates=X_candidates, 
+            screened_indexes, landscape, cycle_meta = sampling_block(
+                X_candidates=X_candidates,
                 X_train=X_train,
-                y_best=y_best,
+                Y_train=Y_train,
                 ml_model=ML_MODEL,
-                acquisition_params=ACQUI_PARAMS,
-                sampling_mode=CYCLE_SAMPLING
+                acquisition_params=cycle_acqui_params,
+                batch_selection_method=BATCH_SEL_METHOD,
+                batch_selection_params=BATCH_SEL_PARAMS,
+                penalization_params=PENALIZATION,
             )
 
             # Save the cycle log
             cycle_log_dict = {
-                'cycle' : cycle,
-                'sampling_mode' : CYCLE_SAMPLING,
-                'n_points' : N_BATCH,
-                'acquisition_params' : ACQUI_PARAMS,
-                'screened_indexes' : np.array(screened_indexes).astype(int).tolist(),
-                'candidates_df_shape' : candidates_df.shape,
-                'train_df_shape' : train_df.shape,
-                'y_best' : int(y_best),
-                'nll' : ML_MODEL.model.log_marginal_likelihood().astype(float),
-                'model_params' : ML_MODEL.__repr__()
+                'cycle':                cycle,
+                'batch_selection_method': BATCH_SEL_METHOD,
+                'n_points':             N_BATCH,
+                'acquisition_params':   cycle_acqui_params,
+                'screened_indexes':     np.array(screened_indexes).astype(int).tolist(),
+                'candidates_df_shape':  list(candidates_df.shape),
+                'train_df_shape':       list(train_df.shape),
+                'model_repr':           ML_MODEL.__repr__(),
             }
             save_to_json(
                 dictionary=cycle_log_dict,
                 fout_name=cycle_output_path / Path(f'cycle_{cycle}_log.json'),
                 timestamp=False
             )
-            
-            # Save the landscape and predictions &
-            # Add landscapes as columns with acquisition parameter names
-            model_predictions_df = pd.DataFrame({
-                **{col: pool_df[col] for col in SEARCH_VAR},
-                'y_pred': y_pred,
-                'y_uncertainty': y_unc
-            })
 
-            model_landscapes_df = pd.DataFrame({
-                **{col: candidates_df[col] for col in SEARCH_VAR}
-            })
-            for i, acqui_param in enumerate(ACQUI_PARAMS):
-                col_name = f"landscape_{acqui_param['acquisition_mode']}"
-                model_landscapes_df[col_name] = landscape[i]
+            # Save predictions (multi-property aware)
+            pred_records = {col: pool_df[col] for col in SEARCH_VAR}
+            if y_pred.ndim == 1 or (y_pred.ndim == 2 and y_pred.shape[1] == 1):
+                pred_records['y_pred']        = y_pred.ravel()
+                pred_records['y_uncertainty'] = y_unc.ravel()
+            else:
+                for i, t in enumerate(TARGET_VAR):
+                    pred_records[f'y_pred_{t}']        = y_pred[:, i]
+                    pred_records[f'y_uncertainty_{t}'] = y_unc[:, i]
+            model_predictions_df = pd.DataFrame(pred_records)
+
+            # Save landscapes
+            model_landscapes_df = pd.DataFrame({col: candidates_df[col] for col in SEARCH_VAR})
+            for i in range(landscape.shape[0]):
+                mode = cycle_acqui_params[i].get('acquisition_mode', str(i)) if i < len(cycle_acqui_params) else str(i)
+                model_landscapes_df[f'landscape_{mode}'] = landscape[i]
 
             model_predictions_df.to_csv(cycle_output_path / Path(f'cycle_{cycle}_predictions.csv'), index=False)
             model_landscapes_df.to_csv(cycle_output_path / Path(f'cycle_{cycle}_landscapes.csv'), index=False)

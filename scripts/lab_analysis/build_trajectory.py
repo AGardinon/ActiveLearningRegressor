@@ -41,7 +41,7 @@ COORD_COLS = [
     "Conc_NaCl_(mM)",
 ]
 TARGET_COL = "Mean_Diameter"
-EXPERIMENTS = ["Andrea", "Andrea2", "Andrea3"]
+EXPERIMENTS = ["Andrea", "Andrea2", "Andrea3", "Andrea4"]
 REPLICATES = ["R1", "R2", "R3"]
 PREFIX = "RoboLab124_Lys100_Asp100_NaCl"
 
@@ -118,8 +118,10 @@ def process_replicate(
                         "replicate": replicate,
                     })
 
-        # RMSE and trajectory row require a prediction npy — skip if absent.
-        pred = get_prediction_npy(cycle_dir, exp_id, cycle)
+        # RMSE uses cycle_{N+1}'s prediction, which is the model trained on cycle_N's data.
+        # This means cycle_0 gets cycle_1's prediction (first model fit), and the last
+        # cycle is dropped (no cycle_{N+1} prediction exists).
+        pred = get_prediction_npy(cycle_dir, exp_id, cycle + 1)
         if pred is None:
             continue
 

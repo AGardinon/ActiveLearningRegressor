@@ -28,7 +28,7 @@ COORD_COLS = [
     "Conc_NaCl_(mM)",
 ]
 TARGET_COL = "Mean_Diameter"
-EXPERIMENTS = ["Andrea", "Andrea2", "Andrea3"]
+EXPERIMENTS = ["Andrea", "Andrea2", "Andrea3", "Andrea4"]
 REPLICATES = ["R1", "R2", "R3"]
 PREFIX = "RoboLab124_Lys100_Asp100_NaCl"
 

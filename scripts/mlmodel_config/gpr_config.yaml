@@ -6,7 +6,7 @@ ml_model: "GPR"
 
 model_parameters:
   kernel: "MATERN_W"  # "RBF_W" or "MATERN_W" or custom recipe
-  n_restarts_optimizer: 150
+  n_restarts_optimizer: 50
   alpha: 1e-10
   normalize_y: true
   optimizer: 'fmin_l_bfgs_b'

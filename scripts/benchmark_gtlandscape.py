@@ -420,7 +420,7 @@ if __name__ == '__main__':
             predefined_acquisition_modes = []
             cycle_acqui_params = acqui_param_gen.get_params_for_cycle(cycle)
             for acp in cycle_acqui_params:
-                predefined_acquisition_modes.extend([acp['acquisition_mode']] * acp['n_points'])
+                predefined_acquisition_modes.extend([acp.get('name', acp['acquisition_mode'])] * acp['n_points'])
 
             # Train the model on current training set
             ML_MODEL.train(X_train, Y_train)

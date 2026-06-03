@@ -6,7 +6,31 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+# ---------------------------------------------------------------------------
+# --- INTERNAL HELPERS
+
+
+def _cycle_to_cumulative_samples(
+    points_df: pd.DataFrame,
+    cycles: np.ndarray,
+    exclude_init: bool = True,
+) -> np.ndarray:
+    """Return cumulative AL-acquired sample count at the end of each cycle.
+
+    Uses the first repetition as reference — all reps share the same
+    acquisition schedule so counts are identical across repetitions.
+    Init points (cycle == 0) are excluded when exclude_init is True.
+    """
+    ref_rep = sorted(points_df["repetition"].unique())[0]
+    df = points_df[points_df["repetition"] == ref_rep]
+    init_count = len(df[df["cycle"] == 0])
+    return np.array([
+        len(df[df["cycle"] <= c]) - (init_count if exclude_init else 0)
+        for c in cycles
+    ])
+
 
 # ---------------------------------------------------------------------------
 # --- PLOT FUNC GENERAL
@@ -45,7 +69,7 @@ def plot_predicted_landscape(X_pool: np.ndarray, pred_array: np.ndarray, columns
 def plot_best_value_over_time(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     true_optimum: float,
-    total_points: int = None,
+    x_axis: str = "samples",
     y_scaling_value: float = 1.0,
     value_col: str = 'y_best_screened',
     palette: str = 'colorblind',
@@ -55,17 +79,17 @@ def plot_best_value_over_time(
     """Plot the best value over time.
 
     Args:
-        experiments (Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]): The experimental data.
-        true_optimum (float): The true optimum value.
-        total_points (int, optional): The total number of points sampled. Defaults to None.
-        y_scaling_value (float, optional): Scaling factor for the y-axis values. Defaults to 1.0.
-        value_col (str, optional): The column name for the best value. Defaults to 'y_best_screened'.
-        palette (str, optional): The color palette to use. Defaults to 'colorblind'.
-        experiment_labels (List[str], optional): The labels for the experiments. Defaults to None.
-        figsize (Tuple[int, int], optional): The figure size. Defaults to (10, 6).
+        experiments: The experimental data.
+        true_optimum: The true optimum value.
+        x_axis: 'samples' (default, cumulative acquired points) or 'cycles'.
+        y_scaling_value: Scaling factor for the y-axis values.
+        value_col: Column name for the best value.
+        palette: Color palette.
+        experiment_labels: Labels for the experiments.
+        figsize: Figure size.
 
     Returns:
-        Tuple[plt.Figure, plt.Axes]: The figure and axes objects.
+        (fig, ax)
     """
     fig, ax = plt.subplots(figsize=figsize, dpi=300)
 
@@ -75,43 +99,35 @@ def plot_best_value_over_time(
         experiments = dict(zip(experiment_labels, experiments.values()))
 
     for exp_name, (points_df, metrics_df) in experiments.items():
-        # Group by repetition and get values per cycle
         all_curves = []
-        
         for rep in metrics_df['repetition'].unique():
             rep_data = metrics_df[metrics_df['repetition'] == rep].sort_values('cycle')
             values = rep_data[value_col].values
             all_curves.append(values)
-        
-        # Convert to array (repetitions x cycles)
-        all_curves = np.array(all_curves)
-        all_curves *= y_scaling_value
+
+        all_curves = np.array(all_curves) * y_scaling_value
         mean_curve = all_curves.mean(axis=0)
         std_curve = all_curves.std(axis=0)
-        
-        cycles = metrics_df[metrics_df['repetition'] == metrics_df['repetition'].unique()[0]]['cycle'].values
-        # if total points is given, show behavior vs points per cycle
-        if total_points is not None:
-            points_per_cycle = total_points // len(cycles)
-            cycles = cycles * points_per_cycle
 
-        ax.plot(cycles, mean_curve, label=exp_name, linewidth=2, color=colors[len(ax.lines)])
-        ax.fill_between(cycles, 
-                        mean_curve - std_curve, 
-                        mean_curve + std_curve, 
-                        alpha=0.15, color=colors[len(ax.lines)-1], zorder=-1
-                        )
+        ref_rep = metrics_df['repetition'].unique()[0]
+        cycles = metrics_df[metrics_df['repetition'] == ref_rep].sort_values('cycle')['cycle'].values
+        x = _cycle_to_cumulative_samples(points_df, cycles) if x_axis == "samples" else cycles
+
+        ax.plot(x, mean_curve, label=exp_name, linewidth=2, color=colors[len(ax.lines)])
+        ax.fill_between(x, mean_curve - std_curve, mean_curve + std_curve,
+                        alpha=0.15, color=colors[len(ax.lines)-1], zorder=-1)
 
     if true_optimum is not None:
         ax.axhline(y=true_optimum, color='.5', linestyle=':', label='Max.', zorder=-1)
-    
+
+    ax.set_xlabel("Cumulative samples" if x_axis == "samples" else "Cycle")
     return fig, ax
 
 
 def plot_simple_regret(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     true_optimum: float,
-    total_points: int = None,
+    x_axis: str = "samples",
     y_scaling_value: float = 1.0,
     value_col: str = 'y_best_screened',
     log_scale: bool = False,
@@ -122,54 +138,50 @@ def plot_simple_regret(
     """Plot the simple regret over time.
 
     Args:
-        experiments (Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]): The experimental data.
-        true_optimum (float): The true optimum value.
-        total_points (int, optional): The total number of points sampled. Defaults to None.
-        y_scaling_value (float, optional): Scaling factor for the y-axis values. Defaults to 1.0.
-        value_col (str, optional): The column name for the best value. Defaults to 'y_best_screened'.
-        log_scale (bool, optional): Whether to use a logarithmic scale for the y-axis. Defaults to False.
-        palette (str, optional): The color palette to use. Defaults to 'colorblind'.
-        experiment_labels (List[str], optional): The labels for the experiments. Defaults to None.
-        figsize (Tuple[int, int], optional): The figure size. Defaults to (10, 6).
+        experiments: The experimental data.
+        true_optimum: The true optimum value.
+        x_axis: 'samples' (default, cumulative acquired points) or 'cycles'.
+        y_scaling_value: Scaling factor for the y-axis values.
+        value_col: Column name for the best value.
+        log_scale: Whether to use a logarithmic scale for the y-axis.
+        palette: Color palette.
+        experiment_labels: Labels for the experiments.
+        figsize: Figure size.
 
     Returns:
-        Tuple[plt.Figure, plt.Axes]: The figure and axes objects.
+        (fig, ax)
     """
     fig, ax = plt.subplots(figsize=figsize, dpi=300)
     colors = sns.color_palette(palette, n_colors=len(experiments))
 
     if experiment_labels is not None:
         experiments = dict(zip(experiment_labels, experiments.values()))
-    
+
     for exp_name, (points_df, metrics_df) in experiments.items():
         all_regrets = []
-        
         for rep in metrics_df['repetition'].unique():
             rep_data = metrics_df[metrics_df['repetition'] == rep].sort_values('cycle')
             values = rep_data[value_col].values * y_scaling_value
-            regret = true_optimum - values
-            # Ensure non-negative and positive for log scale
-            regret = np.maximum(regret, 1e-10)
+            regret = np.maximum(true_optimum - values, 1e-10)
             all_regrets.append(regret)
-        
+
         all_regrets = np.array(all_regrets)
         mean_regret = all_regrets.mean(axis=0)
         std_regret = all_regrets.std(axis=0)
-        
-        cycles = metrics_df[metrics_df['repetition'] == metrics_df['repetition'].unique()[0]]['cycle'].values
-        if total_points is not None:
-            points_per_cycle = total_points // len(cycles)
-            cycles = cycles * points_per_cycle
-        
+
+        ref_rep = metrics_df['repetition'].unique()[0]
+        cycles = metrics_df[metrics_df['repetition'] == ref_rep].sort_values('cycle')['cycle'].values
+        x = _cycle_to_cumulative_samples(points_df, cycles) if x_axis == "samples" else cycles
+
         if log_scale:
             ax.set_yscale('log')
-        ax.plot(cycles, mean_regret, label=exp_name, linewidth=2, color=colors[len(ax.lines)])
-        ax.fill_between(cycles, 
+        ax.plot(x, mean_regret, label=exp_name, linewidth=2, color=colors[len(ax.lines)])
+        ax.fill_between(x,
                         np.maximum(mean_regret - std_regret, 1e-10),
-                        mean_regret + std_regret, 
-                        alpha=0.15, color=colors[len(ax.lines)-1]
-                        )
+                        mean_regret + std_regret,
+                        alpha=0.15, color=colors[len(ax.lines)-1])
 
+    ax.set_xlabel("Cumulative samples" if x_axis == "samples" else "Cycle")
     return fig, ax
 
 
@@ -391,13 +403,18 @@ def plot_batch_diversity_over_time(
 
 
 ACQFUNC_ACRONYMS = {
+    # single-property acquisition modes (keyed by acquisition_mode)
     'exploration_mutual_info' : 'MI',
     'uncertainty_landscape' : 'UL',
     'upper_confidence_bound' : 'UCB',
     'expected_improvement' : 'EI',
     'target_expected_improvement' : 'TEI',
     'percentage_target_expected_improvement' : '%TEI',
-    'random' : 'RND'
+    'random' : 'RND',
+    # canonical multi-property named entries (keyed by name field)
+    # per-property named entries (e.g. explore_y1, exploit_y2) are not listed here;
+    # they fall back to their raw name, which is already self-documenting.
+    'parego_joint' : 'ParEGO',
 }
 
 
@@ -513,9 +530,9 @@ def analyze_acquisition_source_distribution(
 
 
 def plot_model_metrics_over_time(
-    experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]], 
+    experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     metrics: List[str] = ['rmse_vs_gt_val', 'mae_vs_gt_val', 'nll_val'],
-    total_points: int = None,
+    x_axis: str = "samples",
     palette: str = 'colorblind',
     experiment_labels: List[str] = None,
     subplotsize: Tuple[int, int] = (7, 4),
@@ -524,55 +541,51 @@ def plot_model_metrics_over_time(
     """Plot model metrics over time.
 
     Args:
-        experiments (Dict[str, Tuple[pd.DataFrame, pd.DataFrame]]): Dictionary of experiments with their data.
-        metrics (List[str], optional): List of metrics to plot. Defaults to ['rmse_vs_gt_val', 'mae_vs_gt_val', 'nll_val'].
-        total_points (int, optional): Total number of points to plot. Defaults to None.
-        palette (str, optional): Color palette to use. Defaults to 'colorblind'.
-        experiment_labels (List[str], optional): Labels for the experiments. Defaults to None.
-        subplotsize (Tuple[int, int], optional): Figure size. Defaults to (7, 4).
-        n_subplots_cols (int, optional): Number of subplot columns. Defaults to 2.
+        experiments: Dictionary of experiments with their data.
+        metrics: List of metrics to plot.
+        x_axis: 'samples' (default, cumulative acquired points) or 'cycles'.
+        palette: Color palette.
+        experiment_labels: Labels for the experiments.
+        subplotsize: Size per subplot panel.
+        n_subplots_cols: Number of subplot columns.
 
     Returns:
-        Tuple[plt.Figure, List[plt.Axes]]: The figure and axes objects.
+        (fig, axes)
     """
     fig, axes = get_axes(
-        len(metrics), 
-        len(metrics) if len(metrics) < n_subplots_cols else n_subplots_cols, 
+        len(metrics),
+        len(metrics) if len(metrics) < n_subplots_cols else n_subplots_cols,
         fig_frame=subplotsize, res=300)
     if len(metrics) == 1:
         axes = [axes]
-    
+
     colors = sns.color_palette(palette, n_colors=len(experiments))
 
     if experiment_labels is not None:
         experiments = dict(zip(experiment_labels, experiments.values()))
 
+    xlabel = "Cumulative samples" if x_axis == "samples" else "Cycle"
+
     for ax, metric in zip(axes, metrics):
         for exp_name, (points_df, metrics_df) in experiments.items():
             all_curves = []
-            
             for rep in metrics_df['repetition'].unique():
                 rep_data = metrics_df[metrics_df['repetition'] == rep].sort_values('cycle')
-                values = rep_data[metric].values
-                all_curves.append(values)
-            
+                all_curves.append(rep_data[metric].values)
+
             all_curves = np.array(all_curves)
             mean_curve = all_curves.mean(axis=0)
             std_curve = all_curves.std(axis=0)
-            
-            if total_points is not None:
-                points_per_cycle = total_points // len(metrics_df['cycle'].unique())
-                cycles = metrics_df[metrics_df['repetition'] == metrics_df['repetition'].unique()[0]]['cycle'].values * points_per_cycle
-            else:
-                cycles = metrics_df[metrics_df['repetition'] == metrics_df['repetition'].unique()[0]]['cycle'].values
-            
-            ax.plot(cycles, mean_curve, label=exp_name, linewidth=2, color=colors[len(ax.lines)])
-            ax.fill_between(cycles, 
-                            mean_curve - std_curve, 
-                            mean_curve + std_curve, 
-                            alpha=0.15, color=colors[len(ax.lines)-1]
-                            )
-        
+
+            ref_rep = metrics_df['repetition'].unique()[0]
+            cycles = metrics_df[metrics_df['repetition'] == ref_rep].sort_values('cycle')['cycle'].values
+            x = _cycle_to_cumulative_samples(points_df, cycles) if x_axis == "samples" else cycles
+
+            ax.plot(x, mean_curve, label=exp_name, linewidth=2, color=colors[len(ax.lines)])
+            ax.fill_between(x, mean_curve - std_curve, mean_curve + std_curve,
+                            alpha=0.15, color=colors[len(ax.lines)-1])
+
+        ax.set_xlabel(xlabel)
         ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
 
@@ -929,6 +942,40 @@ def set_identical_axes(axes) -> None:
 # --- PLOT FUNC MULTI-PROPERTY
 
 
+def _select_best_repetition(
+    points_df: pd.DataFrame,
+    target_names: List[str],
+    filter_acquisitions: Optional[List[str]],
+    maximize: bool,
+) -> Any:
+    """Return the repetition label with the highest final hypervolume."""
+    from activereg.metrics import compute_pareto_front, compute_hypervolume
+
+    reps = sorted(points_df["repetition"].unique())
+    if len(reps) == 1:
+        return reps[0]
+
+    df = points_df.copy()
+    if filter_acquisitions is not None:
+        df = df[df["acquisition_source"].isin(filter_acquisitions)]
+
+    Y_all = df[target_names].to_numpy(dtype=float)
+    span = Y_all.max(axis=0) - Y_all.min(axis=0)
+    ref = Y_all.min(axis=0) - 0.01 * (span + 1.0)
+
+    best_rep, best_hv = reps[0], -np.inf
+    for rep in reps:
+        Y_rep = df[df["repetition"] == rep][target_names].to_numpy(dtype=float)
+        if len(Y_rep) == 0:
+            continue
+        pf_mask = compute_pareto_front(Y_rep, maximize=maximize)
+        hv = compute_hypervolume(Y_rep[pf_mask], ref)
+        if hv > best_hv:
+            best_hv = hv
+            best_rep = rep
+    return best_rep
+
+
 def plot_objective_space(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     target_names: List[str],
@@ -941,6 +988,8 @@ def plot_objective_space(
     column_number: int|None = None,
     experiment_labels: Optional[List[str]] = None,
     acronym_map: Optional[Dict[str, str]] = ACQFUNC_ACRONYMS,
+    repetition: Union[int, str] = "best",
+    show_all_fronts: bool = False,
 ) -> Tuple[plt.Figure, list]:
     """Scatter sampled points in objective space.
 
@@ -950,6 +999,10 @@ def plot_objective_space(
     Pool points are shown as a gray background when pool_df is provided.
     The true Pareto front of the pool and the discovered Pareto front of the
     sampled points are both highlighted.
+
+    When data contains multiple repetitions, a single representative repetition
+    is selected for the scatter. Optionally, the Pareto fronts of all repetitions
+    can be overlaid as thin background lines to convey front variability.
 
     Args:
         experiments: Dict mapping name to (train_points_data df, benchmark_data df).
@@ -968,6 +1021,13 @@ def plot_objective_space(
         palette: Seaborn palette for acquisition-source coloring.
         figsize: Size of a single subplot panel.
         experiment_labels: Optional rename list for experiment keys.
+        repetition: Which repetition to show as the model-case scatter.
+                    'best' (default) selects the rep with the highest final
+                    hypervolume; an integer selects by position in the sorted
+                    repetition list.
+        show_all_fronts: If True, draw thin semi-transparent Pareto-front lines
+                         for every repetition in the background, with the selected
+                         rep's front drawn prominently on top.
 
     Returns:
         (fig, axes) where axes is a list with one Axes per experiment.
@@ -1014,8 +1074,39 @@ def plot_objective_space(
                 label="True PF",
             )
 
-        # ── sampled points ───────────────────────────────────────────────
-        df = points_df.copy()
+        # ── select representative repetition ─────────────────────────────
+        all_reps = sorted(points_df["repetition"].unique())
+        if isinstance(repetition, int):
+            selected_rep = all_reps[repetition]
+        else:
+            selected_rep = _select_best_repetition(
+                points_df, target_names, filter_acquisitions, maximize
+            )
+
+        # ── background Pareto fronts for all repetitions ─────────────────
+        if show_all_fronts and len(all_reps) > 1:
+            other_reps_plotted = False
+            for rep in all_reps:
+                if rep == selected_rep:
+                    continue
+                df_rep = points_df[points_df["repetition"] == rep].copy()
+                if filter_acquisitions is not None:
+                    df_rep = df_rep[df_rep["acquisition_source"].isin(filter_acquisitions)]
+                Y_rep = df_rep[target_names].to_numpy(dtype=float)
+                if len(Y_rep) == 0:
+                    continue
+                pf_mask = compute_pareto_front(Y_rep, maximize=maximize)
+                pf_rep = Y_rep[pf_mask]
+                pf_rep = pf_rep[np.argsort(pf_rep[:, 0])]
+                ax.plot(
+                    pf_rep[:, 0], pf_rep[:, 1],
+                    color="crimson", linewidth=1.0, alpha=0.5, zorder=2,
+                    label="Other reps PF" if not other_reps_plotted else "_nolegend_",
+                )
+                other_reps_plotted = True
+
+        # ── sampled points (selected repetition only) ────────────────────
+        df = points_df[points_df["repetition"] == selected_rep].copy()
         if filter_acquisitions is not None:
             df = df[df["acquisition_source"].isin(filter_acquisitions)]
 
@@ -1028,7 +1119,7 @@ def plot_objective_space(
                 ax.scatter(
                     df.loc[mask, target_names[0]].values,
                     df.loc[mask, target_names[1]].values,
-                    c=[source_color_map[source]], s=25, alpha=0.8, zorder=2,
+                    c=[source_color_map[source]], s=25, alpha=0.8, zorder=3,
                     label=label,
                 )
         else:
@@ -1038,20 +1129,21 @@ def plot_objective_space(
             )
             sc = ax.scatter(
                 df[target_names[0]].values, df[target_names[1]].values,
-                c=color_vals, cmap="viridis", s=25, alpha=0.8, zorder=2,
+                c=color_vals, cmap="viridis", s=25, alpha=0.8, zorder=3,
             )
             label = "Sample index" if color_by == "cumulative_index" else "Cycle"
             fig.colorbar(sc, ax=ax, label=label, shrink=0.8)
 
-        # ── sampled Pareto front ─────────────────────────────────────────
+        # ── sampled Pareto front (selected repetition) ───────────────────
         if len(Y) > 0:
             pf_mask = compute_pareto_front(Y, maximize=maximize)
             pf_pts = Y[pf_mask]
             pf_pts = pf_pts[np.argsort(pf_pts[:, 0])]
             ax.plot(
                 pf_pts[:, 0], pf_pts[:, 1],
-                color="crimson", linewidth=2.0, marker="o", markersize=5,
-                zorder=3, label="Sampled PF",
+                color="crimson", linewidth=2.0, 
+                # marker="o", markersize=5,
+                zorder=4, label="Sampled PF",
             )
 
         ax.set_xlabel(target_names[0])
@@ -1189,14 +1281,14 @@ def plot_hypervolume_over_time(
 def plot_per_property_best_over_time(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     target_names: List[str],
-    total_points: Optional[int] = None,
+    x_axis: str = "samples",
     ceiling_values: Optional[Dict[str, float]] = None,
     palette: str = "colorblind",
     subplotsize: Tuple[float, float] = (6.0, 4.0),
     column_number: int|None = None,
     experiment_labels: Optional[List[str]] = None,
 ) -> Tuple[plt.Figure, list]:
-    """Plot y_best for each property over cycles, one panel per property.
+    """Plot y_best for each property over time, one panel per property.
 
     Reads the y_best_{name} columns from benchmark_data.csv. Analogous to
     plot_best_value_over_time but with one subplot per objective.
@@ -1204,7 +1296,8 @@ def plot_per_property_best_over_time(
     Args:
         experiments: Dict mapping name to (train_points_data df, benchmark_data df).
         target_names: Objective column names, e.g. ['y1', 'y2'].
-        total_points: If provided, x-axis shows cumulative points instead of cycles.
+        x_axis: 'samples' (default, cumulative acquired points) or 'cycles'.
+        ceiling_values: Optional dict of property → reference ceiling to draw as a dashed line.
         palette: Seaborn palette for experiment lines.
         subplotsize: Size of each per-property panel.
         experiment_labels: Optional rename list for experiment keys.
@@ -1221,10 +1314,11 @@ def plot_per_property_best_over_time(
         axes = [axes]
 
     colors = sns.color_palette(palette, n_colors=len(experiments))
+    xlabel = "Cumulative samples" if x_axis == "samples" else "Cycle"
 
     for ax, prop in zip(axes, target_names):
         col = f"y_best_{prop}"
-        for color, (exp_name, (_, metrics_df)) in zip(colors, experiments.items()):
+        for color, (exp_name, (points_df, metrics_df)) in zip(colors, experiments.items()):
             all_curves: List[np.ndarray] = []
             for rep in sorted(metrics_df["repetition"].unique()):
                 rep_data = metrics_df[metrics_df["repetition"] == rep].sort_values("cycle")
@@ -1239,7 +1333,7 @@ def plot_per_property_best_over_time(
                 metrics_df[metrics_df["repetition"] == ref_rep]
                 .sort_values("cycle")["cycle"].values
             )
-            x = cycles * (total_points // len(cycles)) if total_points else cycles
+            x = _cycle_to_cumulative_samples(points_df, cycles) if x_axis == "samples" else cycles
 
             ax.plot(x, mean_c, label=exp_name, linewidth=2, color=color)
             ax.fill_between(x, mean_c - std_c, mean_c + std_c,
@@ -1252,7 +1346,7 @@ def plot_per_property_best_over_time(
             )
 
         ax.set_title(f"y_best: {prop}")
-        ax.set_xlabel("Cumulative samples" if total_points else "Cycle")
+        ax.set_xlabel(xlabel)
         ax.set_ylabel(f"Best {prop}")
         ax.legend(loc="best", fontsize=8)
         ax.grid(True, alpha=0.3)
@@ -1261,67 +1355,168 @@ def plot_per_property_best_over_time(
     return fig, axes
 
 
+# def plot_weight_distribution(
+#     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
+#     joint_entry_name: str,
+#     palette: str = "colorblind",
+#     figsize: Tuple[float, float] = (5.0, 5.0),
+#     column_number: int|None = None,
+#     experiment_labels: Optional[List[str]] = None,
+# ) -> Tuple[plt.Figure, list]:
+#     """Scatter the Dirichlet-sampled weights from a joint acquisition entry.
+
+#     Reads the resolved_weights_{joint_entry_name} column from benchmark_data.csv
+#     and plots each (w1, w2, ...) sample. For P=2 this is a 2D simplex scatter
+#     that visually confirms weight diversity. For P>2 a per-weight histogram is
+#     shown instead.
+
+#     Args:
+#         experiments: Dict mapping name to (train_points_data df, benchmark_data df).
+#         joint_entry_name: Name of the joint acquisition entry (e.g. 'parego_joint').
+#         palette: Seaborn palette for experiment points.
+#         figsize: Size of each subplot panel.
+#         experiment_labels: Optional rename list for experiment keys.
+
+#     Returns:
+#         (fig, axes) where axes is a list with one Axes per experiment.
+#     """
+#     if experiment_labels is not None:
+#         experiments = dict(zip(experiment_labels, experiments.values()))
+
+#     col = f"resolved_weights_{joint_entry_name}"
+#     n_exp = len(experiments)
+#     fig, axes = get_axes(n_exp, n_exp if column_number is None else column_number, fig_frame=figsize, res=300)
+#     if n_exp == 1:
+#         axes = [axes]
+
+#     colors = sns.color_palette(palette, n_colors=n_exp)
+
+#     for ax, color, (exp_name, (points_df, metrics_df)) in zip(axes, colors, experiments.items()):
+
+#         raw = metrics_df[col].dropna()
+#         weights = np.array([
+#             ast.literal_eval(w) if isinstance(w, str) else list(w)
+#             for w in raw
+#         ])  # (N, P)
+
+#         P = weights.shape[1] if weights.ndim == 2 else 1
+
+#         if P == 2:
+#             ax.scatter(weights[:, 0], weights[:, 1], color=color,
+#                        alpha=0.7, s=25, edgecolors="none")
+#             # Simplex boundary
+#             ax.plot([0, 1], [1, 0], "k--", linewidth=1, alpha=0.4)
+#             ax.set_xlabel("$w_1$")
+#             ax.set_ylabel("$w_2$")
+#             ax.set_xlim(-0.05, 1.05)
+#             ax.set_ylim(-0.05, 1.05)
+#             ax.set_aspect("equal")
+#         else:
+#             for j in range(P):
+#                 ax.hist(weights[:, j], alpha=0.5, label=f"$w_{j+1}$", bins=20)
+#             ax.legend(fontsize=8)
+#             ax.set_xlabel("Weight value")
+#             ax.set_ylabel("Count")
+
+#         ax.set_title(exp_name)
+#         ax.grid(True, alpha=0.25)
+
+#     fig.tight_layout()
+#     return fig, axes
+
+from scipy.stats import beta as beta_dist
+
 def plot_weight_distribution(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     joint_entry_name: str,
+    alpha: Optional[float] = None,          # if given, overlays theoretical Beta(α,α)
+    color_by_cycle: bool = False,           # color marginal rug by cycle index
     palette: str = "colorblind",
-    figsize: Tuple[float, float] = (5.0, 5.0),
-    column_number: int|None = None,
+    figsize: Tuple[float, float] = (5.0, 4.0),
+    column_number: int | None = None,
     experiment_labels: Optional[List[str]] = None,
 ) -> Tuple[plt.Figure, list]:
-    """Scatter the Dirichlet-sampled weights from a joint acquisition entry.
+    """Weight coverage diagnostic for a joint ParEGO acquisition.
 
-    Reads the resolved_weights_{joint_entry_name} column from benchmark_data.csv
-    and plots each (w1, w2, ...) sample. For P=2 this is a 2D simplex scatter
-    that visually confirms weight diversity. For P>2 a per-weight histogram is
-    shown instead.
+    For P=2: plots the marginal KDE of w1 with optional Beta(α,α) overlay.
+    For P>2: per-weight KDE grid.
 
     Args:
         experiments: Dict mapping name to (train_points_data df, benchmark_data df).
-        joint_entry_name: Name of the joint acquisition entry (e.g. 'parego_joint').
-        palette: Seaborn palette for experiment points.
-        figsize: Size of each subplot panel.
-        experiment_labels: Optional rename list for experiment keys.
-
-    Returns:
-        (fig, axes) where axes is a list with one Axes per experiment.
+        joint_entry_name: acquisition entry name, used to resolve column name.
+        alpha: Dirichlet concentration parameter; if provided overlays theoretical density.
+        color_by_cycle: if True, rug ticks are colored by normalized cycle index.
+        palette: seaborn palette.
+        figsize: per-panel figure size.
+        column_number: subplot grid columns override.
+        experiment_labels: optional rename list.
     """
     if experiment_labels is not None:
         experiments = dict(zip(experiment_labels, experiments.values()))
 
     col = f"resolved_weights_{joint_entry_name}"
     n_exp = len(experiments)
-    fig, axes = get_axes(n_exp, n_exp if column_number is None else column_number, fig_frame=figsize, res=300)
+    fig, axes = get_axes(
+        n_exp, n_exp if column_number is None else column_number,
+        fig_frame=figsize, res=300
+    )
     if n_exp == 1:
         axes = [axes]
 
     colors = sns.color_palette(palette, n_colors=n_exp)
 
-    for ax, color, (exp_name, (_, metrics_df)) in zip(axes, colors, experiments.items()):
+    for ax, color, (exp_name, (points_df, metrics_df)) in zip(axes, colors, experiments.items()):
         raw = metrics_df[col].dropna()
         weights = np.array([
             ast.literal_eval(w) if isinstance(w, str) else list(w)
             for w in raw
         ])  # (N, P)
-
-        P = weights.shape[1] if weights.ndim == 2 else 1
+        P = weights.shape[1]
 
         if P == 2:
-            ax.scatter(weights[:, 0], weights[:, 1], color=color,
-                       alpha=0.7, s=25, edgecolors="none")
-            # Simplex boundary
-            ax.plot([0, 1], [1, 0], "k--", linewidth=1, alpha=0.4)
-            ax.set_xlabel("w₁")
-            ax.set_ylabel("w₂")
-            ax.set_xlim(-0.05, 1.05)
-            ax.set_ylim(-0.05, 1.05)
-            ax.set_aspect("equal")
+            w1 = weights[:, 0]
+
+            # KDE of empirical marginal
+            sns.kdeplot(w1, ax=ax, color=color, linewidth=2, label="empirical")
+
+            # Theoretical Beta(α, α) overlay
+            if alpha is not None:
+                xs = np.linspace(0.01, 0.99, 300)
+                ax.plot(xs, beta_dist.pdf(xs, alpha, alpha),
+                        color="black", linewidth=1.2, linestyle="--",
+                        alpha=0.6, label=f"Beta({alpha}, {alpha})")
+
+            # Rug: cycle-colored or flat
+            if color_by_cycle and "cycle" in metrics_df.columns:
+                cycles = metrics_df.loc[raw.index, "cycle"].to_numpy(float)
+                norm_c = (cycles - cycles.min()) / (cycles.ptp() + 1e-9)
+                cmap = plt.cm.viridis
+                for w, nc in zip(w1, norm_c):
+                    ax.axvline(w, ymin=0, ymax=0.04,
+                               color=cmap(nc), alpha=0.5, linewidth=0.8)
+            else:
+                ax.plot(w1, np.full_like(w1, ax.get_ylim()[0]),
+                        "|", color=color, alpha=0.3, markersize=4)
+
+            ax.set_xlabel("$w_1$")
+            ax.set_ylabel("density")
+            ax.set_xlim(0, 1)
+            ax.axvline(0.5, color="gray", linewidth=0.8, linestyle=":", alpha=0.5)
+
+            if alpha is not None:
+                ax.legend(fontsize=8)
+
         else:
+            # P > 2: per-weight KDE
             for j in range(P):
-                ax.hist(weights[:, j], alpha=0.5, label=f"w{j+1}", bins=20)
+                sns.kdeplot(weights[:, j], ax=ax, label=f"$w_{{{j+1}}}$", linewidth=1.5)
+                if alpha is not None:
+                    xs = np.linspace(0.01, 0.99, 300)
+                    ax.plot(xs, beta_dist.pdf(xs, alpha, alpha),
+                            "k--", linewidth=1, alpha=0.4)
+            ax.set_xlabel("weight value")
+            ax.set_ylabel("density")
             ax.legend(fontsize=8)
-            ax.set_xlabel("Weight value")
-            ax.set_ylabel("Count")
 
         ax.set_title(exp_name)
         ax.grid(True, alpha=0.25)
@@ -1480,7 +1675,7 @@ def plot_hv_gain_attribution(
     source_colors = dict(zip(all_sources, colors))
 
     n_exp = len(experiments)
-    fig, axes = get_axes(n_exp, n_exp, fig_frame=subplotsize, res=300)
+    fig, axes = get_axes(n_exp, 2, fig_frame=subplotsize, res=300)
     if n_exp == 1:
         axes = [axes]
 
@@ -1525,8 +1720,12 @@ def plot_hv_gain_attribution(
         ax.set_title(exp_name)
         ax.set_xlabel("Cumulative samples")
         ax.set_ylabel("Cumulative HV gain")
-        ax.legend(loc="upper left", fontsize=8, framealpha=0.8)
+        # ax.legend(loc="upper left", fontsize=8, framealpha=0.8)
         ax.grid(True, alpha=0.3, axis="y")
+
+    # Shared legend outside the loop to avoid repetition and overlap (shifted above the plots)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=len(all_sources), framealpha=0.8)
 
     fig.tight_layout()
     return fig, axes

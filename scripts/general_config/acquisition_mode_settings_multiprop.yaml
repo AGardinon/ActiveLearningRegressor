@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Acquisition mode settings — multi-property ParEGO (BraninCurrin baseline)
+# Acquisition mode settings — multi-property ParEGO
 # ------------------------------------------------------------------------------
 # Each entry has a `name:` field so the acquisition protocol in
 # benchmark_config_multiprop.yaml can reference it unambiguously even when
@@ -19,6 +19,16 @@ acquisition_parameters:
   # -- Per-property uncertainty exploration (y2)
   - name: explore_y2
     acquisition_mode: uncertainty_landscape
+    target_variable: y2
+
+  # -- Property 1 EI (y1)
+  - name: exploit_y1
+    acquisition_mode: expected_improvement
+    target_variable: y1
+
+  # -- Property 2 EI (y2)
+  - name: exploit_y2
+    acquisition_mode: expected_improvement
     target_variable: y2
 
   # -- Joint ParEGO acquisition (augmented Chebyshev, random Dirichlet weights)

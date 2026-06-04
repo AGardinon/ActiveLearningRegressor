@@ -117,18 +117,31 @@ def scalarize(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Scalarize per-property (mu, sigma) arrays into 1-D acquisition inputs.
 
-    Implements ParEGO-style scalarization (Knowles 2006).  The uncertainty
-    ``sigma_z`` is propagated via the delta method under the independence
-    assumption (DESIGN.md §D9).
+    **Convention:** all properties are treated as objectives to *maximise*.
+    The normalisation maps each property to quality space — ``mu_tilde_i = 1``
+    corresponds to the current best observed value, ``0`` to the worst.  This
+    is the opposite of Knowles (2006) / ParEGO, which operates in cost space
+    (0 = ideal).  Applying the Knowles negation form
+    (``-max_i(w_i*(1-mu_tilde_i))``) in quality space is **not** equivalent to
+    the min-formulation below for non-uniform weights, and produces different
+    Pareto-front exploration.  The min-formulation is the natural Chebyshev
+    max-min principle in quality space: maximise the weakest weighted property.
+
+    The uncertainty ``sigma_z`` is propagated via the delta method under the
+    independence assumption.
 
     Supported methods:
 
     * ``"augmented_chebyshev"`` (default): ::
 
           mu_tilde_i = (mu_i - y_min_i) / (y_max_i - y_min_i + eps)
-          z = max_i(w_i * mu_tilde_i)  +  rho * sum_i(w_i * mu_tilde_i)
+          z = min_i(w_i * mu_tilde_i)  +  rho * sum_i(w_i * mu_tilde_i)
 
-      Gradient (delta method): ``dz/dmu_i = w_i * (rho + I(i == argmax)) / denom_i``.
+      Maximising ``z`` promotes Pareto-balanced candidates: the min term
+      forces the weakest property to be as high as possible; the rho term
+      breaks ties in favour of overall quality.
+
+      Gradient (delta method): ``dz/dmu_i = w_i * (rho + I(i == argmin)) / denom_i``.
 
     * ``"weighted_sum"``: ``z = sum_i(w_i * mu_tilde_i)``.
       Gradient: ``dz/dmu_i = w_i / denom_i``.
@@ -159,8 +172,8 @@ def scalarize(
         sigma_z = np.sqrt(np.sum((grad[None, :] * sigmas) ** 2, axis=1))
 
     elif method == "augmented_chebyshev":
-        k_star = np.argmax(w_tilde, axis=1)                        # (N,)
-        mu_z = np.max(w_tilde, axis=1) + rho * np.sum(w_tilde, axis=1)
+        k_star = np.argmin(w_tilde, axis=1)                        # (N,) — weakest property
+        mu_z = np.min(w_tilde, axis=1) + rho * np.sum(w_tilde, axis=1)
         # active indicator: shape (N, P)
         active = (np.arange(mus.shape[1])[None, :] == k_star[:, None]).astype(float)
         grad = weights[None, :] * (active + rho) / denom[None, :]  # (N, P)
@@ -607,7 +620,7 @@ class BatchSelectionStrategy:
         Parameters for different strategies:
             - Highest Landscape Sampling:
                 - percentile (int): Percentile for highest landscape selection.
-                - sampling_method (str): Sampling method ('random', 'kmeans', 'voronoi').
+                - sampling_method (str): Sampling method ('fps', 'voronoi', 'random'). Defaults to 'fps'.
             - Constant Liar:
                 - lie_type (str): Type of lie value ('max', 'min', 'mean').
                 - lie_value (float): Specific lie value to use.
@@ -623,7 +636,7 @@ class BatchSelectionStrategy:
         assert strategy_mode in self.modes, f'Function "{strategy_mode}" not implemented, choose from {self.modes}'
         # additional parameters
         self.percentile = strategy_params.get('percentile', 95)
-        self.sampling_method = strategy_params.get('sampling_method', 'voronoi')
+        self.sampling_method = strategy_params.get('sampling_method', 'fps')
         self.lie_type = strategy_params.get('lie_type', 'max')
         self.lie_value = strategy_params.get('lie_value', None)
         self.L = strategy_params.get('L', 1.0)
@@ -659,7 +672,7 @@ class BatchSelectionStrategy:
                 acquisition_function=acquisition_function,
                 batch_size=batch_size,
                 percentile=self.percentile,
-                sampling_method=self.sampling_method
+                sampling_method=self.sampling_method,
             )
         
         elif self.strategy_mode == 'constant_liar':
@@ -743,44 +756,57 @@ def batch_highest_landscape(
     batch_size: int,
     #
     percentile: int,
-    sampling_method: str = 'voronoi',
+    sampling_method: str = 'fps',
 ) -> np.ndarray:
     """Batch acquisition using Highest Landscape Sampling strategy.
+
+    For ``batch_size == 1`` returns the global argmax of the acquisition
+    landscape.  For ``batch_size > 1`` restricts candidates to the top
+    ``percentile`` by acquisition score, then samples from that quality
+    region via ``sampling_method``.  When ``sampling_method='fps'``
+    (default), FPS is anchored at the in-subset argmax so the
+    highest-scoring point is always included and the remaining points
+    maximise spatial diversity within the quality region.
 
     Args:
         X_candidates (np.ndarray): Candidate points.
         model (MLModel): Machine learning model.
         acquisition_function (AcquisitionFunction): Acquisition function instance.
         batch_size (int): Number of points to acquire.
-        percentile (int): Percentile for highest landscape selection.
-        sampling_method (str, optional): Sampling method. Defaults to 'voronoi'.
+        percentile (int): Percentile threshold for the quality region (batch_size > 1 only).
+        sampling_method (str): Sampling method for batch_size > 1 ('fps', 'voronoi', 'random').
+            Defaults to 'fps'.
     Returns:
         np.ndarray: Indices of selected points, referred to the original candidate set.
     """
-    # Make a copy to avoid modifying original data
     X_candidates_tmp = X_candidates.copy()
-
-    # Track original candidate indexes
     X_candidates_indexes = np.arange(X_candidates.shape[0])
 
-    # Compute landscape
     landscape = acquisition_function.landscape_acquisition(X_candidates_tmp, model)
     landscape = landscape_sanity_check(landscape)
 
-    # Select top percentile points
+    if batch_size == 1:
+        return np.array([int(np.argmax(landscape))])
+
+    # Filter to top-percentile quality region
     candidate_indices = highest_landscape_selection(landscape=landscape, percentile=percentile)
     X_candidates_selected = X_candidates_tmp[candidate_indices]
     X_candidates_selected_indices = X_candidates_indexes[candidate_indices]
 
-    # Select points from the selected candidates
+    # For FPS, anchor at the in-subset argmax so the best acquisition
+    # score is always the first selected point.
+    kwargs = {}
+    if sampling_method == 'fps':
+        kwargs['start_idx'] = int(np.argmax(landscape[candidate_indices]))
+
     sampled_indices = sample_landscape(
         X_landscape=X_candidates_selected,
         n_points=batch_size,
-        sampling_mode=sampling_method
+        sampling_mode=sampling_method,
+        **kwargs,
     )
-    sampled_new_indices = X_candidates_selected_indices[sampled_indices]
 
-    return sampled_new_indices
+    return X_candidates_selected_indices[sampled_indices]
 
 
 # Batch acquisition using Constant Liar strategy

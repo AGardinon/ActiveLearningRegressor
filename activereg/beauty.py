@@ -3,6 +3,7 @@
 import ast
 import pandas as pd
 import numpy as np
+from scipy.stats import beta as beta_dist
 import seaborn as sns
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -589,7 +590,6 @@ def plot_model_metrics_over_time(
         ax.legend(loc='best')
         ax.grid(True, alpha=0.3)
 
-    fig.tight_layout()
     return fig, axes
 
 
@@ -990,6 +990,8 @@ def plot_objective_space(
     acronym_map: Optional[Dict[str, str]] = ACQFUNC_ACRONYMS,
     repetition: Union[int, str] = "best",
     show_all_fronts: bool = False,
+    legend: bool = False,
+    tight_layout: bool = False,
 ) -> Tuple[plt.Figure, list]:
     """Scatter sampled points in objective space.
 
@@ -1149,10 +1151,12 @@ def plot_objective_space(
         ax.set_xlabel(target_names[0])
         ax.set_ylabel(target_names[1])
         ax.set_title(exp_name)
-        ax.legend(loc="best", fontsize=7, framealpha=0.8)
+        if legend:
+            ax.legend(loc="best", fontsize=7, framealpha=0.8)
         ax.grid(True, alpha=0.2)
 
-    fig.tight_layout()
+    if tight_layout:
+        fig.tight_layout()
     return fig, axes
 
 
@@ -1167,6 +1171,8 @@ def plot_hypervolume_over_time(
     palette: str = "colorblind",
     figsize: Tuple[float, float] = (9.0, 5.0),
     experiment_labels: Optional[List[str]] = None,
+    legend: bool = False,
+    tight_layout: bool = False,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Plot hypervolume indicator growth over time.
 
@@ -1272,9 +1278,11 @@ def plot_hypervolume_over_time(
 
     ax.set_xlabel("Cumulative samples" if x_axis == "samples" else "Cycle")
     ax.set_ylabel("Hypervolume indicator")
-    ax.legend(loc="best")
+    if legend:
+        ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+    if tight_layout:
+        fig.tight_layout()
     return fig, ax
 
 
@@ -1287,6 +1295,8 @@ def plot_per_property_best_over_time(
     subplotsize: Tuple[float, float] = (6.0, 4.0),
     column_number: int|None = None,
     experiment_labels: Optional[List[str]] = None,
+    legend: bool = False,
+    tight_layout: bool = False,
 ) -> Tuple[plt.Figure, list]:
     """Plot y_best for each property over time, one panel per property.
 
@@ -1348,10 +1358,12 @@ def plot_per_property_best_over_time(
         ax.set_title(f"y_best: {prop}")
         ax.set_xlabel(xlabel)
         ax.set_ylabel(f"Best {prop}")
-        ax.legend(loc="best", fontsize=8)
+        if legend:
+            ax.legend(loc="best", fontsize=8)
         ax.grid(True, alpha=0.3)
 
-    fig.tight_layout()
+    if tight_layout:
+        fig.tight_layout()
     return fig, axes
 
 
@@ -1424,7 +1436,6 @@ def plot_per_property_best_over_time(
 #     fig.tight_layout()
 #     return fig, axes
 
-from scipy.stats import beta as beta_dist
 
 def plot_weight_distribution(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
@@ -1435,6 +1446,8 @@ def plot_weight_distribution(
     figsize: Tuple[float, float] = (5.0, 4.0),
     column_number: int | None = None,
     experiment_labels: Optional[List[str]] = None,
+    legend: bool = False,
+    tight_layout: bool = False,
 ) -> Tuple[plt.Figure, list]:
     """Weight coverage diagnostic for a joint ParEGO acquisition.
 
@@ -1466,6 +1479,10 @@ def plot_weight_distribution(
     colors = sns.color_palette(palette, n_colors=n_exp)
 
     for ax, color, (exp_name, (points_df, metrics_df)) in zip(axes, colors, experiments.items()):
+        # check if the col existst and has non-null values
+        if col not in metrics_df.columns or metrics_df[col].dropna().empty:
+            continue
+
         raw = metrics_df[col].dropna()
         weights = np.array([
             ast.literal_eval(w) if isinstance(w, str) else list(w)
@@ -1503,7 +1520,7 @@ def plot_weight_distribution(
             ax.set_xlim(0, 1)
             ax.axvline(0.5, color="gray", linewidth=0.8, linestyle=":", alpha=0.5)
 
-            if alpha is not None:
+            if alpha is not None and legend:
                 ax.legend(fontsize=8)
 
         else:
@@ -1516,12 +1533,14 @@ def plot_weight_distribution(
                             "k--", linewidth=1, alpha=0.4)
             ax.set_xlabel("weight value")
             ax.set_ylabel("density")
-            ax.legend(fontsize=8)
+            if legend:
+                ax.legend(fontsize=8)
 
         ax.set_title(exp_name)
         ax.grid(True, alpha=0.25)
 
-    fig.tight_layout()
+    if tight_layout:
+        fig.tight_layout()
     return fig, axes
 
 
@@ -1535,6 +1554,8 @@ def plot_pareto_hit_rate(
     figsize: Tuple[float, float] = (8.0, 5.0),
     experiment_labels: Optional[List[str]] = None,
     acronym_map: Optional[Dict[str, str]] = ACQFUNC_ACRONYMS,
+    legend: bool = False,
+    tight_layout: bool = False,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Grouped bar chart of Pareto hit rate per acquisition source.
 
@@ -1608,12 +1629,14 @@ def plot_pareto_hit_rate(
         )
 
     ax.set_xticks(x)
-    ax.set_xticklabels(list(experiments.keys()), ha="center")
+    ax.set_xticklabels(list(experiments.keys()), ha="center", rotation=60)
     ax.set_ylabel("Pareto hit rate")
     ax.set_ylim(0, 1.05)
-    ax.legend(loc="best", fontsize=8)
+    if legend:
+        ax.legend(loc="best", fontsize=8)
     ax.grid(True, alpha=0.3, axis="y")
-    fig.tight_layout()
+    if tight_layout:
+        fig.tight_layout()
     return fig, ax
 
 
@@ -1627,6 +1650,8 @@ def plot_hv_gain_attribution(
     subplotsize: Tuple[float, float] = (8.0, 4.0),
     experiment_labels: Optional[List[str]] = None,
     acronym_map: Optional[Dict[str, str]] = ACQFUNC_ACRONYMS,
+    legend: bool = False,
+    tight_layout: bool = False,
 ) -> Tuple[plt.Figure, list]:
     """Stacked area of cumulative HV gain attributed to each acquisition source.
 
@@ -1723,11 +1748,13 @@ def plot_hv_gain_attribution(
         # ax.legend(loc="upper left", fontsize=8, framealpha=0.8)
         ax.grid(True, alpha=0.3, axis="y")
 
-    # Shared legend outside the loop to avoid repetition and overlap (shifted above the plots)
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=len(all_sources), framealpha=0.8)
-
-    fig.tight_layout()
+    if legend:
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper center", ncol=len(all_sources), bbox_to_anchor=(0.5, 1.05), framealpha=0.8)
+        if tight_layout:
+            fig.tight_layout(rect=[0, 0, 1, 0.92])
+    elif tight_layout:
+        fig.tight_layout()
     return fig, axes
 
 

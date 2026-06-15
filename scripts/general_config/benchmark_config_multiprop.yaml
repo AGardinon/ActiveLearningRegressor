@@ -1,11 +1,11 @@
 # ------------------------------------------------------------------------------
-# Multi-property benchmark configuration — BraninCurrin baseline
+# Multi-property benchmark configuration — DTLZ2 baseline
 # Reference run for ParEGO (Phase 2 validation)
 # ------------------------------------------------------------------------------
 SEED: null
 
-experiment_name: "2D/branincurrin_gpr_60cy_1pt_parego_negsignscalarization"
-experiment_notes: "Phase 2 ParEGO reference run on BraninCurrin (2D input, 2 objectives)"
+experiment_name: "4D/dtlz2_gpr_33cy_3pt_parego_exploit_2"
+experiment_notes: "Phase 2 ParEGO reference run on DTLZ2 (4D input, 2 objectives)"
 
 # --------------------------------------------------------------
 # Ground truth: no CSV — pool and validation are generated on the fly
@@ -18,6 +18,8 @@ experiment_evidence: null
 search_space_variables:
   - "x1"
   - "x2"
+  - "x3"
+  - "x4"
 
 target_variables:
   - "y1"
@@ -30,8 +32,8 @@ scaler_params: null
 
 # --------------------------------------------------------------
 # Cycles parameters
-n_cycles: 60
-init_batch_size: 1
+n_cycles: 33
+init_batch_size: 3
 init_sampling: "random"
 
 landscape_penalization: null
@@ -40,15 +42,14 @@ batch_selection:
   method: "highest_landscape"
   method_params:
     percentile: 90
-    sampling_method: "voronoi"
 
 # Multi-stage acquisition protocol
 # Entry names match the `name:` fields in acquisition_mode_settings_multiprop.yaml
 acquisition_protocol:
   stage_1:
-    cycles: 60
-    acquisition_modes: ['parego_joint']
-    n_points: [1]
+    cycles: 33
+    acquisition_modes: ['exploit_y1', 'exploit_y2', 'parego_joint']
+    n_points: [1, 1, 1]
   # stage_2:
   #   cycles: 10
   #   acquisition_modes: ['exploit_y1', 'exploit_y2', 'parego_joint']

@@ -45,7 +45,6 @@ batch_selection:
   method_params: # if `null` uses default params for the selected mode (see documentation for details)
     # eg. for highest_landscape:
     percentile: 95
-    sampling_method: "voronoi"
 
 # Multi-stage acquisition protocol configuration
 acquisition_protocol:

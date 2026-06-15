@@ -65,7 +65,6 @@ model_parameters:
 batch_selection_method: "highest_landscape"
 batch_selection_params:
   percentile: 95
-  sampling_method: "voronoi"
 
 # ------------------------------------------------------------------------------
 # Landscape penalization (null to disable)

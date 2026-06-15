@@ -39,6 +39,6 @@ acquisition_parameters:
       - y2
     weight_sampler:
       mode: dirichlet
-      alpha: 0.5        # alpha < 1 concentrates weight on corners → better Pareto spread
+      alpha: 5.0 #0.5        # alpha < 1 concentrates weight on corners → better Pareto spread
     scalarization: augmented_chebyshev
     rho: 0.05

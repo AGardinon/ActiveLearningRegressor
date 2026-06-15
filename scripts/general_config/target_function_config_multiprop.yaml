@@ -4,13 +4,13 @@
 
 # Function settings
 function_parameters:
-  function: "BraninCurrin"
+  function: "DTLZ2_2obj_4D"
 
 # Train set configuration (initial pool)
 # val_size is overridden to 1.0 internally when no ground_truth_file is provided,
 # so the script generates pool + validation from the same settings.
 train_set_parameters:
-  n_samples: 5000
+  n_samples: 50000
   method: "lhs"
   val_size: null      # overridden by benchmark_functions.py when gt_file is null
   negate: true        # negate so EI acquisition maximises (= minimises original objectives)

@@ -35,7 +35,6 @@ data_scaler: "StandardScaler"
 batch_selection_method: "highest_landscape"
 batch_selection_params:
   percentile: 95
-  sampling_method: "voronoi"
 
 # List of acquisition parameters functions to be used in the simulation
 acquisition_parameters:

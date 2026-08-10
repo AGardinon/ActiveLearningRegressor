@@ -413,6 +413,36 @@ def create_bnn_instance(model_parameters: dict) -> regmodels.MLModel:
     return regmodels.BayesianNN(**model_parameters)
 
 
+def _merge_entry_meta(meta_parts: list[dict | None]) -> dict | None:
+    """Collapse the metadata of q q-ParEGO sub-entries into one entry dict.
+
+    An entry that was NOT expanded contributes a single part and is returned
+    untouched, so its metadata keeps exactly the shape it had before Phase 2.9
+    (``_resolved_weights`` of shape ``(P,)``, scalar ``_y_best_z``).
+
+    An expanded entry contributes ``q`` parts, one per acquired point, in
+    point-selection order. They are stacked so the caller still sees one dict
+    per ORIGINAL entry: ``_resolved_weights`` of shape ``(q, P)`` and
+    ``_y_best_z`` of shape ``(q,)``.
+
+    Args:
+        meta_parts (list[dict | None]): Per-sub-entry metadata, in
+            point-selection order.
+
+    Returns:
+        dict | None: One metadata dict for the original entry, or ``None`` for
+        per-property / fast-path entries.
+    """
+    if len(meta_parts) == 1:
+        return meta_parts[0]
+
+    return {
+        '_resolved_weights': np.vstack([m['_resolved_weights'] for m in meta_parts]),
+        '_y_best_z':         np.array([m['_y_best_z'] for m in meta_parts], dtype=float),
+        'target_variables':  meta_parts[0]['target_variables'],
+    }
+
+
 def sampling_block(
         X_candidates: np.ndarray,
         X_train: np.ndarray,
@@ -430,6 +460,18 @@ def sampling_block(
     candidate pool, runs one full cycle of acquisition + batch selection, and
     returns the selected indices, the per-entry padded landscapes, and
     per-entry metadata (resolved weights and ``y_best_z`` for joint entries).
+
+    **q-ParEGO expansion (D13).** A joint entry that samples its weights
+    (``weight_sampler``) and asks for ``n_points = q > 1`` is internally
+    expanded into ``q`` single-point sub-entries. Each sub-entry draws its own
+    weight vector, recomputes its own ``y_best_z`` from that weight, builds its
+    own scalarized landscape and selects one point; the shared
+    ``candidate_mask`` prevents duplicates. Every other entry — single-property,
+    joint with ``q == 1``, and joint with fixed ``weights`` — is passed through
+    untouched and therefore runs the exact pre-Phase-2.9 code path with
+    unchanged RNG consumption. Expansion is invisible to the caller: the
+    returned landscape array and metadata list still hold one row / one dict
+    per entry that was passed in.
 
     Args:
         X_candidates (np.ndarray): Candidate points, shape (M, d).
@@ -457,13 +499,20 @@ def sampling_block(
         tuple:
             - ``list[int]``: Indices into ``X_candidates`` selected this cycle.
             - ``np.ndarray``: Landscape array of shape ``(n_entries, M)`` with
-              each row padded to the full pool size.
+              each row padded to the full pool size. An expanded joint entry
+              still contributes a single row: the element-wise maximum over its
+              ``q`` per-weight sub-landscapes, i.e. the best acquisition value
+              reachable over the directions sampled this cycle.
             - ``list[dict | None]``: Per-entry metadata. For joint entries:
               ``{"_resolved_weights": np.ndarray, "_y_best_z": float,
-              "target_variables": list[str]}``. For per-property / fast-path
-              entries: ``None``.
+              "target_variables": list[str]}``, with ``_resolved_weights`` of
+              shape ``(P,)``. For an EXPANDED joint entry the same keys hold the
+              per-point values in point-selection order: ``_resolved_weights``
+              of shape ``(q, P)`` and ``_y_best_z`` of shape ``(q,)``. For
+              per-property / fast-path entries: ``None``.
     """
     M = len(X_candidates)
+    n_entries = len(acquisition_params)
 
     # Y_train must be 2-D: (N, P)
     if Y_train.ndim == 1:
@@ -478,10 +527,36 @@ def sampling_block(
     candidate_mask = np.ones(M, dtype=bool)
 
     sampled_new_idx: list[int] = []
-    landscape_list: list[np.ndarray] = []
-    per_entry_meta: list[dict | None] = []
 
-    for acp in acquisition_params:
+    # ----------------------------------------------------------------------
+    # q-ParEGO internal expansion (D13 / P2.9.1).
+    # A joint entry that samples its own weights and asks for q > 1 points
+    # becomes q single-point sub-entries, each drawing a fresh weight (and its
+    # own y_best_z) so the batch spreads over the Pareto front instead of
+    # sharing one scalarization direction. The gate is deliberately narrow:
+    # single-property entries, joint entries with q == 1, and joint entries
+    # with fixed `weights` are appended untouched, so they execute the exact
+    # pre-existing body and draw exactly as many random numbers as before.
+    # ----------------------------------------------------------------------
+    expansion_plan: list[tuple[int, dict]] = []
+    for entry_idx, acp in enumerate(acquisition_params):
+        if (acp.get('target_variables') is not None
+                and acp.get('weight_sampler') is not None
+                and acp.get('n_points', 1) > 1):
+            for _ in range(acp['n_points']):
+                sub_acp = acp.copy()
+                sub_acp['n_points'] = 1
+                expansion_plan.append((entry_idx, sub_acp))
+        else:
+            expansion_plan.append((entry_idx, acp))
+
+    # Accumulators keyed by ORIGINAL entry index: sub-entries of an expanded
+    # entry write into the same slot and are collapsed back before returning,
+    # so the caller's positional alignment with `acquisition_params` holds.
+    landscape_parts: list[list[np.ndarray]] = [[] for _ in range(n_entries)]
+    meta_parts: list[list[dict | None]] = [[] for _ in range(n_entries)]
+
+    for entry_idx, acp in expansion_plan:
         acqui_param = acp.copy()
         n_points_per_style = acqui_param.pop('n_points')
         # target_variable is NOT popped: it flows into AcquisitionFunction.__init__
@@ -542,7 +617,7 @@ def sampling_block(
             acqui_param['y_stats']  = y_stats
 
         # Metadata returned to caller for logging.
-        per_entry_meta.append(
+        meta_parts[entry_idx].append(
             {
                 '_resolved_weights': resolved_weights,
                 '_y_best_z':         y_best_z_val,
@@ -576,7 +651,7 @@ def sampling_block(
             )
             full_ndx = idx_map[random_sub_ndx]
             sampled_new_idx += list(full_ndx)
-            landscape_list.append(np.zeros(M))
+            landscape_parts[entry_idx].append(np.zeros(M))
             candidate_mask[full_ndx] = False
             X_train_copy = np.concatenate([X_train_copy, X_candidates[full_ndx]])
             continue
@@ -600,7 +675,7 @@ def sampling_block(
         # Pad to full pool size (unselected entries stay 0).
         landscape_full = np.zeros(M)
         landscape_full[candidate_mask] = landscape_sub
-        landscape_list.append(landscape_full)
+        landscape_parts[entry_idx].append(landscape_full)
 
         # --- maximum_predicted_value fast-path ---
         if acqui_func.acquisition_mode == 'maximum_predicted_value':
@@ -640,6 +715,15 @@ def sampling_block(
         sampled_new_idx += list(full_idx)
         candidate_mask[full_idx] = False
         X_train_copy = np.concatenate([X_train_copy, X_candidates[full_idx]])
+
+    # Collapse expanded sub-entries back to one landscape row / one metadata
+    # dict per ORIGINAL entry. Entries that were not expanded pass through
+    # their single part unchanged.
+    landscape_list = [
+        parts[0] if len(parts) == 1 else np.max(np.vstack(parts), axis=0)
+        for parts in landscape_parts
+    ]
+    per_entry_meta = [_merge_entry_meta(parts) for parts in meta_parts]
 
     return sampled_new_idx, np.vstack(landscape_list), per_entry_meta
 

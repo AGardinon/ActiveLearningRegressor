@@ -1447,6 +1447,65 @@ def plot_per_property_best_over_time(
 #     return fig, axes
 
 
+def _load_joint_weights(
+    points_df: pd.DataFrame,
+    metrics_df: pd.DataFrame,
+    joint_entry_name: str,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Read the ParEGO weight samples of a joint entry from a saved run.
+
+    Two storage layouts are supported, newest first:
+
+    1. **Per-point (current, D13).** ``train_points_data.csv`` carries a
+       ``resolved_weights`` column — one weight vector per acquired point.
+       Rows are filtered to ``acquisition_source == joint_entry_name``. This is
+       the only layout that shows the ``q`` distinct weights a batched
+       q-ParEGO entry draws within a single cycle.
+    2. **Per-cycle (legacy).** ``benchmark_data.csv`` carries a
+       ``resolved_weights_{joint_entry_name}`` column — one weight vector per
+       cycle. Used as a fallback so runs saved before Phase 2.9 stay plottable.
+
+    Args:
+        points_df (pd.DataFrame): ``train_points_data`` frame.
+        metrics_df (pd.DataFrame): ``benchmark_data`` frame.
+        joint_entry_name (str): Name of the joint acquisition entry.
+
+    Returns:
+        tuple:
+            - ``np.ndarray | None``: Weights of shape ``(N, P)``, or ``None``
+              when neither layout holds usable data.
+            - ``np.ndarray | None``: Matching cycle index of shape ``(N,)``,
+              or ``None`` when no cycle column is available.
+    """
+    def _parse(raw: pd.Series) -> np.ndarray:
+        return np.array([
+            ast.literal_eval(w) if isinstance(w, str) else list(w)
+            for w in raw
+        ])
+
+    # 1. Per-point column (D13).
+    if points_df is not None and "resolved_weights" in points_df.columns:
+        sub = points_df
+        if "acquisition_source" in sub.columns:
+            sub = sub[sub["acquisition_source"] == joint_entry_name]
+        raw = sub["resolved_weights"].dropna()
+        if not raw.empty:
+            cycles = (sub.loc[raw.index, "cycle"].to_numpy(float)
+                      if "cycle" in sub.columns else None)
+            return _parse(raw), cycles
+
+    # 2. Legacy per-cycle column.
+    col = f"resolved_weights_{joint_entry_name}"
+    if metrics_df is not None and col in metrics_df.columns:
+        raw = metrics_df[col].dropna()
+        if not raw.empty:
+            cycles = (metrics_df.loc[raw.index, "cycle"].to_numpy(float)
+                      if "cycle" in metrics_df.columns else None)
+            return _parse(raw), cycles
+
+    return None, None
+
+
 def plot_weight_distribution(
     experiments: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
     joint_entry_name: str,
@@ -1464,9 +1523,15 @@ def plot_weight_distribution(
     For P=2: plots the marginal KDE of w1 with optional Beta(α,α) overlay.
     For P>2: per-weight KDE grid.
 
+    Weights are read per POINT from the ``resolved_weights`` column of
+    ``train_points_data`` (rows whose ``acquisition_source`` is
+    ``joint_entry_name``), falling back to the legacy per-cycle
+    ``resolved_weights_{joint_entry_name}`` column of ``benchmark_data`` for
+    runs saved before Phase 2.9. See ``_load_joint_weights``.
+
     Args:
         experiments: Dict mapping name to (train_points_data df, benchmark_data df).
-        joint_entry_name: acquisition entry name, used to resolve column name.
+        joint_entry_name: acquisition entry name, used to resolve the weights.
         alpha: Dirichlet concentration parameter; if provided overlays theoretical density.
         color_by_cycle: if True, rug ticks are colored by normalized cycle index.
         palette: seaborn palette.
@@ -1479,7 +1544,6 @@ def plot_weight_distribution(
     if experiment_labels is not None:
         experiments = dict(zip(experiment_labels, experiments.values()))
 
-    col = f"resolved_weights_{joint_entry_name}"
     n_exp = len(experiments)
     fig, axes = get_axes(
         n_exp, n_exp if column_number is None else column_number,
@@ -1491,15 +1555,15 @@ def plot_weight_distribution(
     colors = sns.color_palette(palette, n_colors=n_exp)
 
     for ax, color, (exp_name, (points_df, metrics_df)) in zip(axes, colors, experiments.items()):
-        # check if the col existst and has non-null values
-        if col not in metrics_df.columns or metrics_df[col].dropna().empty:
+        # Per-point weights (D13) with a fallback to the legacy per-cycle column.
+        weights, weight_cycles = _load_joint_weights(
+            points_df=points_df,
+            metrics_df=metrics_df,
+            joint_entry_name=joint_entry_name,
+        )
+        if weights is None:
             continue
 
-        raw = metrics_df[col].dropna()
-        weights = np.array([
-            ast.literal_eval(w) if isinstance(w, str) else list(w)
-            for w in raw
-        ])  # (N, P)
         P = weights.shape[1]
 
         if P == 2:
@@ -1516,9 +1580,9 @@ def plot_weight_distribution(
                         alpha=0.6, label=f"Beta({alpha}, {alpha})")
 
             # Rug: cycle-colored or flat
-            if color_by_cycle and "cycle" in metrics_df.columns:
-                cycles = metrics_df.loc[raw.index, "cycle"].to_numpy(float)
-                norm_c = (cycles - cycles.min()) / (cycles.ptp() + 1e-9)
+            if color_by_cycle and weight_cycles is not None:
+                cycles = weight_cycles
+                norm_c = (cycles - cycles.min()) / (np.ptp(cycles) + 1e-9)
                 cmap = plt.cm.viridis
                 for w, nc in zip(w1, norm_c):
                     ax.axvline(w, ymin=0, ymax=0.04,

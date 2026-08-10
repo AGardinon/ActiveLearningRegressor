@@ -580,6 +580,29 @@ if __name__ == '__main__':
                 rng=rng,
             )
 
+            # Per-point ParEGO metadata (D13): a weight vector belongs to a
+            # POINT, not to a cycle — a batched joint entry draws a fresh weight
+            # per point. Build lists parallel to `predefined_acquisition_modes`
+            # so row i of the train-points log carries the weight that actually
+            # selected point i.
+            per_point_weights = []
+            per_point_y_best_z = []
+            for entry, meta in zip(cycle_acqui_params, cycle_meta):
+                n_pts = entry['n_points']
+                if meta is None:
+                    per_point_weights.extend([None] * n_pts)
+                    per_point_y_best_z.extend([None] * n_pts)
+                    continue
+                w_rows = np.atleast_2d(meta['_resolved_weights']).tolist()
+                z_vals = np.atleast_1d(meta['_y_best_z']).tolist()
+                if len(w_rows) == 1 and n_pts > 1:
+                    # Fixed-`weights` joint entry: not expanded, so the whole
+                    # batch shares the single scalarization direction.
+                    w_rows = w_rows * n_pts
+                    z_vals = z_vals * n_pts
+                per_point_weights.extend(w_rows)
+                per_point_y_best_z.extend(z_vals)
+
             # Store benchmark data for the current cycle
             cycle_data_dict = {
                 "repetition": rep+1,
@@ -597,13 +620,8 @@ if __name__ == '__main__':
                 )
                 cycle_metrics_dict.update({f"{k}_{name}": v for k, v in prop_metrics.items()})
             cycle_data_dict.update(cycle_metrics_dict)
-            # Log joint-entry metadata: resolved weights and y_best_z for ParEGO entries.
-            # Per-property and fast-path entries have meta=None and are skipped.
-            for entry, meta in zip(cycle_acqui_params, cycle_meta):
-                if meta is not None:
-                    entry_id = entry.get('name', entry.get('acquisition_mode', 'joint'))
-                    cycle_data_dict[f"y_best_z_{entry_id}"] = meta['_y_best_z']
-                    cycle_data_dict[f"resolved_weights_{entry_id}"] = meta['_resolved_weights'].tolist()
+            # NOTE: joint-entry weights / y_best_z are no longer logged per cycle;
+            # they are per-point quantities and live in train_points_data.csv (D13).
             benchmark_data.append(cycle_data_dict)
 
             # Update the train and candidates sets
@@ -618,6 +636,11 @@ if __name__ == '__main__':
                     "cycle": cycle+1,
                     "repetition": rep+1,
                     "acquisition_source": predefined_acquisition_modes[i],
+                    # Only joint (ParEGO) points carry these; omitting the keys
+                    # keeps single-property logs at their pre-Phase-2.9 schema.
+                    **({"resolved_weights": per_point_weights[i],
+                        "y_best_z": per_point_y_best_z[i]}
+                       if per_point_weights[i] is not None else {}),
                     **{name: float(sampled_Y[i, j]) for j, name in enumerate(TARGET_VAR)},
                 })
 

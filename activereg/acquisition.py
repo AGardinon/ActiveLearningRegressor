@@ -419,10 +419,28 @@ class AcquisitionFunction:
             return percentage_target_expected_improvement(mu=mu, sigma=sigma, y_best=self.y_best, percentage=self.tei_percentage)
 
         elif self.acquisition_mode == 'exploration_mutual_info':
-            try:
-                noise_var = ml_model.model.kernel_.k2.noise_level
-            except AttributeError:
-                raise ValueError('noise_level not found, GPR needs to be trained with a WhiteKernel().')
+            if effective_target_variables is not None:
+                raise ValueError(
+                    "exploration_mutual_info is not defined for joint multi-property "
+                    "entries. Its sigma is the scalarized sigma_z, a weight-dependent "
+                    "blend of the per-property uncertainties, and no single observation "
+                    "noise corresponds to it — the mutual-information ratio would be "
+                    "meaningless. Use a per-property entry ('target_variable') instead."
+                )
+            if hasattr(ml_model, 'target_names'):
+                # Multi-property wrapper: the noise belongs to one property.
+                # No target_variable means the legacy first-property default,
+                # matching the prop_idx=0 fallback in sampling_block.
+                prop = effective_target_variable or ml_model.target_names[0]
+                noise_var = ml_model.noise_variance(prop)
+            else:
+                # Legacy path: a bare single-property MLModel.
+                if not hasattr(ml_model, 'noise_variance'):
+                    raise ValueError(
+                        f"{ml_model!r} does not define a noise variance; "
+                        "exploration_mutual_info requires a GPR with a WhiteKernel."
+                    )
+                noise_var = ml_model.noise_variance
             return exploration_mutual_info(sigma=sigma, noise_var=noise_var)
 
         elif self.acquisition_mode == 'maximum_predicted_value':

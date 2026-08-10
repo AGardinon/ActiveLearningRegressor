@@ -3,10 +3,38 @@ import warnings
 import numpy as np
 
 from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import WhiteKernel
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.exceptions import ConvergenceWarning
 
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
+
+
+def find_white_noise_level(kernel: Any) -> Optional[float]:
+    """Depth-first search for a ``WhiteKernel``'s ``noise_level`` in a kernel tree.
+
+    Composite sklearn kernels nest through ``k1``/``k2`` (``Sum``, ``Product``)
+    and ``kernel`` (``Exponentiation``), so the noise term can sit anywhere in
+    the tree. Searching for it is more robust than indexing a fixed position:
+    the shipped ``'*_W'`` recipes happen to put it at ``.k2``, but
+    ``get_gp_kernel`` also accepts user-composed kernel lists.
+
+    Args:
+        kernel (Any): A fitted sklearn kernel (``estimator.kernel_``), or None.
+
+    Returns:
+        float | None: The fitted ``noise_level``, or ``None`` if the tree holds
+        no ``WhiteKernel``.
+    """
+    if kernel is None:
+        return None
+    if isinstance(kernel, WhiteKernel):
+        return float(kernel.noise_level)
+    for attr in ('k1', 'k2', 'kernel'):
+        found = find_white_noise_level(getattr(kernel, attr, None))
+        if found is not None:
+            return found
+    return None
 
 
 class GPR:
@@ -52,6 +80,29 @@ class GPR:
         # in Ensemble methods y_hat is the set of predictions
         y_hat = y_hat_mean
         return y_hat, y_hat_mean, y_hat_uncertainty
+
+    @property
+    def noise_variance(self) -> float:
+        """Learned observation-noise variance, from the fitted ``WhiteKernel``.
+
+        This is the ``sigma_n^2`` that ``exploration_mutual_info`` needs to
+        separate epistemic from observation uncertainty.
+
+        Raises:
+            ValueError: If the model is untrained, or its kernel carries no
+                ``WhiteKernel`` term (i.e. not one of the ``'*_W'`` recipes).
+
+        Returns:
+            float: The fitted noise variance.
+        """
+        noise = find_white_noise_level(getattr(self.model, 'kernel_', None))
+        if noise is None:
+            raise ValueError(
+                f"No fitted WhiteKernel found on {self!r}. A noise variance is "
+                "only defined for a trained GPR whose kernel includes a "
+                "WhiteKernel term (e.g. the 'MATERN_W' / 'RBF_W' recipes)."
+            )
+        return noise
 
     def evaluate(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
         """Evaluate model performance on test set."""

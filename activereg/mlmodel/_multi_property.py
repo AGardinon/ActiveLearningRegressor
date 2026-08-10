@@ -70,6 +70,35 @@ class IndependentMultiPropertyModel:
             raise KeyError(f"Unknown property '{name}'. Available: {self.target_names}")
         return self._models[name].predict(X)
 
+    def noise_variance(self, name: str) -> float:
+        """Learned observation-noise variance of one property's model.
+
+        Only models that expose a ``noise_variance`` (currently ``GPR``) can
+        answer this; it is needed by ``exploration_mutual_info``. There is no
+        wrapper-level noise variance, because each property is fitted
+        independently and has its own.
+
+        Args:
+            name (str): Target property name.
+
+        Raises:
+            KeyError: If ``name`` is not one of ``target_names``.
+            ValueError: If that property's model has no noise variance.
+
+        Returns:
+            float: The property's fitted noise variance.
+        """
+        if name not in self._models:
+            raise KeyError(f"Unknown property '{name}'. Available: {self.target_names}")
+        model = self._models[name]
+        if not hasattr(model, 'noise_variance'):
+            raise ValueError(
+                f"Model for property '{name}' ({model!r}) does not define a "
+                "noise variance. Acquisition modes that need one (e.g. "
+                "'exploration_mutual_info') require a GPR with a WhiteKernel."
+            )
+        return model.noise_variance
+
     def __repr__(self) -> str:
         parts = ", ".join(
             f"{name}: {self._models[name]!r}" for name in self.target_names

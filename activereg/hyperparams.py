@@ -76,21 +76,21 @@ def get_custom_gp_kernel(kernel_recipe: list):
 GPR_MATERN_PARAM_GRID = {
     'kernel': [
         ConstantKernel(1.0) * Matern(length_scale=lc, nu=2.5) + WhiteKernel(noise_level=noise)
-        for lc in [0.01, 0.1, 1.0]
+        for lc in [0.01, 0.1, 1.0, 10.0]
         for noise in [0.5, 0.1]
     ],
-    'alpha': [1e-12, 1e-8],
-    'normalize_y': [True, False],
+    # 'alpha': [1e-12, 1e-10, 1e-8],
+    'normalize_y': [True], #, False],
     'n_restarts_optimizer': [150],
 }
 
 GPR_RBF_PARAM_GRID = {
     'kernel': [
         ConstantKernel(1.0) * RBF(length_scale=lc) + WhiteKernel(noise_level=noise)
-        for lc in [0.01, 0.1, 1.0]
+        for lc in [0.01, 0.1, 1.0, 10.0]
         for noise in [0.5, 0.1]
     ],
-    'alpha': [1e-12, 1e-8],
+    'alpha': [1e-12, 1e-10, 1e-8],
     'normalize_y': [True, False],
     'n_restarts_optimizer': [100],
 }

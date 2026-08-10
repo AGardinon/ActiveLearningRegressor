@@ -895,11 +895,14 @@ def get_alphas(Z: np.ndarray, scale: bool=False, treshold: float=.50001) -> np.n
     return alphas
 
 
-def get_axes(plots: int, 
-             max_col: int =2, 
-             fig_frame: tuple =(3.3,3.), 
-             res: int =200):
+def get_axes(plots: int,
+             max_col: int =2,
+             fig_frame: tuple =(3.3,3.),
+             res: int =200,
+             subplot_kw: dict =None):
     """Define Fig and Axes objects.
+
+    subplot_kw is forwarded to plt.subplots, e.g. {'projection': '3d'}.
     """
     # cols and rows definitions
     cols = plots if plots <= max_col else max_col
@@ -908,14 +911,20 @@ def get_axes(plots: int,
     fig, axes = plt.subplots(rows,
                              cols,
                              figsize=(cols * fig_frame[0], rows * fig_frame[1]),
-                             dpi=res)
+                             dpi=res,
+                             subplot_kw=subplot_kw)
     if plots > 1:
         axes = axes.flatten()
         for i in range(plots, max_col*rows):
-            remove_frame(axes[i])
+            # remove_frame only hides spines/ticks; a 3d axes would still draw
+            # its panes and grid, so blank it outright
+            if hasattr(axes[i], 'zaxis'):
+                axes[i].set_axis_off()
+            else:
+                remove_frame(axes[i])
     elif plots == 1:
         pass
-    
+
     return fig, axes
 
 
@@ -990,6 +999,7 @@ def plot_objective_space(
     acronym_map: Optional[Dict[str, str]] = ACQFUNC_ACRONYMS,
     repetition: Union[int, str] = "best",
     show_all_fronts: bool = False,
+    show_best_front_only: bool = False,
     legend: bool = False,
     tight_layout: bool = False,
 ) -> Tuple[plt.Figure, list]:
@@ -1089,8 +1099,8 @@ def plot_objective_space(
         if show_all_fronts and len(all_reps) > 1:
             other_reps_plotted = False
             for rep in all_reps:
-                if rep == selected_rep:
-                    continue
+                # if rep == selected_rep:
+                #     continue
                 df_rep = points_df[points_df["repetition"] == rep].copy()
                 if filter_acquisitions is not None:
                     df_rep = df_rep[df_rep["acquisition_source"].isin(filter_acquisitions)]
@@ -1137,7 +1147,7 @@ def plot_objective_space(
             fig.colorbar(sc, ax=ax, label=label, shrink=0.8)
 
         # ── sampled Pareto front (selected repetition) ───────────────────
-        if len(Y) > 0:
+        if len(Y) > 0 and show_best_front_only:
             pf_mask = compute_pareto_front(Y, maximize=maximize)
             pf_pts = Y[pf_mask]
             pf_pts = pf_pts[np.argsort(pf_pts[:, 0])]
@@ -1463,6 +1473,8 @@ def plot_weight_distribution(
         figsize: per-panel figure size.
         column_number: subplot grid columns override.
         experiment_labels: optional rename list.
+        legend: if True, shows legend.
+        tight_layout: if True, applies tight layout.
     """
     if experiment_labels is not None:
         experiments = dict(zip(experiment_labels, experiments.values()))
@@ -1515,7 +1527,7 @@ def plot_weight_distribution(
                 ax.plot(w1, np.full_like(w1, ax.get_ylim()[0]),
                         "|", color=color, alpha=0.3, markersize=4)
 
-            ax.set_xlabel("$w_1$")
+            ax.set_xlabel("$\lambda_1$")
             ax.set_ylabel("density")
             ax.set_xlim(0, 1)
             ax.axvline(0.5, color="gray", linewidth=0.8, linestyle=":", alpha=0.5)

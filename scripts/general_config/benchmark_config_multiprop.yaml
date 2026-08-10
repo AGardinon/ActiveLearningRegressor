@@ -1,11 +1,11 @@
 # ------------------------------------------------------------------------------
-# Multi-property benchmark configuration — DTLZ2 baseline
+# Multi-property benchmark configuration
 # Reference run for ParEGO (Phase 2 validation)
 # ------------------------------------------------------------------------------
 SEED: null
 
-experiment_name: "4D/dtlz2_gpr_33cy_3pt_parego_exploit_2"
-experiment_notes: "Phase 2 ParEGO reference run on DTLZ2 (4D input, 2 objectives)"
+experiment_name: "4D/zdt3_gpr_33cy_3pt_parego_exploit_2"
+experiment_notes: "Phase 2 ParEGO reference run on ZDT3 (4D input, 2 objectives)"
 
 # --------------------------------------------------------------
 # Ground truth: no CSV — pool and validation are generated on the fly

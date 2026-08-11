@@ -15,6 +15,7 @@ Active learning reduces labeling cost by iteratively selecting the most informat
 - [Lab Use](#lab-use)
 - [ML Models](#ml-models)
 - [Acquisition Functions](#acquisition-functions)
+- [Multi-Property Optimization](#multi-property-optimization)
 - [Sampling Strategies](#sampling-strategies)
 - [Configuration](#configuration)
 - [Running Benchmarks](#running-benchmarks)
@@ -279,23 +280,65 @@ The `KernelFactory` in `activereg/mlmodel/_kernels.py` supports composing standa
 
 Acquisition functions map the model's predictions over the unlabeled pool to a scalar *informativeness* score for each candidate point.
 
-| Mode | Description |
-|---|---|
-| `UCB` | Upper Confidence Bound — balances mean and uncertainty |
-| `EI` | Expected Improvement over current best |
-| `TEI` | Target Expected Improvement — steers toward a target value |
-| `uncertainty` | Pure uncertainty sampling |
-| `max_pred` | Maximum predicted value |
+> **Convention:** all acquisition functions are defined for **maximisation** — a higher predicted mean or acquisition score is always better. Minimisation objectives must be negated upstream.
+
+| Mode | Key parameters | Description |
+|---|---|---|
+| `upper_confidence_bound` | `kappa` (default `2.0`) | `μ + κ·σ` — tunable exploration/exploitation balance |
+| `expected_improvement` | `xi` (default `0.01`) | Expected improvement over the best observation |
+| `target_expected_improvement` | `y_target`, and exactly one of `dist` or `epsilon` | Steers toward a target value rather than the maximum |
+| `percentage_target_expected_improvement` | `percentage` | As above, with the target set as a percentage of the observed range |
+| `maximum_predicted_value` | — | Pure exploitation: rank by predicted mean |
+| `uncertainty_landscape` | — | Pure exploration: rank by predicted uncertainty |
+| `exploration_mutual_info` | noise variance | Mutual-information exploration; needs a meaningful noise estimate |
+
+**Numbered variants.** Any mode may carry a numeric suffix — `expected_improvement_1`, `target_expected_improvement_2` — which selects the same formula but lets one acquisition protocol declare the same mode several times with different parameters. The suffix is stripped internally (`acquisition.py:291`).
 
 ```python
 from activereg.acquisition import AcquisitionFunction
 
-acq = AcquisitionFunction(mode="UCB", kappa=2.0)
-landscape = acq.compute(y_mean, y_uncertainty)
-batch_idx = acq.select_batch(landscape, n=5)
+acq = AcquisitionFunction(
+    acquisition_mode="upper_confidence_bound",
+    y_best=float(y_train.max()),
+    kappa=2.0,
+)
+landscape = acq.landscape_acquisition(X_candidates, ml_model)
 ```
 
-Batch selection applies a Gaussian penalty around already-selected points to encourage diversity within a single batch (`penalize_landscape_fast`).
+### Batch selection
+
+Given a landscape, a batch of `q` points is chosen by one of:
+
+| Strategy | Function | Description |
+|---|---|---|
+| Highest landscape | `batch_highest_landscape` | Draws spatially from the top percentile of the landscape |
+| Constant liar | `batch_constant_liar` | Imputes a fixed value for pending points, then re-acquires |
+| Kriging believer | `batch_kriging_believer` | Imputes the model's own prediction for pending points |
+| Local penalization | `batch_local_penalization` | Suppresses the landscape around already-selected points |
+
+`highest_landscape` is the strategy in practical use. `penalize_landscape_fast` applies the Gaussian suppression used for within-batch diversity.
+
+---
+
+## Multi-Property Optimization
+
+> **⚠️ Under development — documentation to be added.**
+>
+> The implementation is merged and usable, but the API and configuration
+> schema may still change. Treat this section as a pointer, not a spec.
+
+`activereg` supports active learning campaigns that optimize several target properties jointly, rather than one at a time.
+
+**What exists today:**
+
+- `IndependentMultiPropertyModel` (`activereg/mlmodel/_multi_property.py`) — a dict of independent single-property models sharing one interface, plus `wrap_single_property` for backwards compatibility.
+- ParEGO-style scalarization in `activereg/acquisition.py` — `scalarize()`, `WeightSampler`, and `compute_per_property_stats()`. Random per-cycle weight sampling turns the multi-property problem into a sequence of scalar ones, tracing out the Pareto front across cycles.
+- `augmented_chebyshev` scalarization (default) applied in **quality space**, where each property is normalised so `0` = worst and `1` = best, consistent with the maximisation convention above.
+- Multi-property config variants alongside their single-property counterparts: `scripts/general_config/*_multiprop.yaml`.
+
+**Not yet documented here:** the joint acquisition entry schema, weight-sampling options, per-property vs joint dispatch, and worked examples.
+
+Backwards compatibility is preserved throughout — single-property campaigns are unaffected, and all existing acquisition formulas and batch selectors operate unchanged on the scalarized 1-D landscape.
 
 ---
 
@@ -312,9 +355,9 @@ Once the acquisition landscape is computed, a batch of candidates is drawn using
 ```python
 from activereg.sampling import sample_landscape
 
-batch = sample_landscape(
-    X_pool, landscape, n=5, method="fps"
-)
+# X_top: coordinates of the candidates surviving the landscape filter.
+# Returns the indices of the selected points within X_top.
+selected_idx = sample_landscape(X_top, n_points=5, sampling_mode="fps")
 ```
 
 ---
@@ -330,7 +373,9 @@ scripts/
 │   ├── acquisition_mode_settings.yaml # acquisition function parameters
 │   └── target_function_config.yaml    # benchmark function / dataset settings
 ├── mlmodel_config/
-│   └── model_config.yaml              # ML model type and hyperparameters
+│   ├── gpr_config.yaml                # Gaussian Process Regressor
+│   ├── knnregressor_config.yaml       # k-Nearest Neighbours
+│   └── mlpanchored_config.yaml        # Anchored Ensemble MLP  [extra: nn]
 └── lab_cycle_config_template.yaml     # template for run_lab_cycle.py
 ```
 

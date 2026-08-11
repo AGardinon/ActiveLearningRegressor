@@ -5,13 +5,20 @@
 
 import numpy as np
 from functools import partial as _partial
-from botorch.test_functions import Hartmann, Ackley, StyblinskiTang
-from botorch.test_functions.multi_objective import (
-    BraninCurrin as _BraninCurrin,
-    DTLZ2 as _DTLZ2,
-    ZDT3 as _ZDT3,
-    DTLZ7 as _DTLZ7,
-)
+try:
+    from botorch.test_functions import Hartmann, Ackley, StyblinskiTang
+    from botorch.test_functions.multi_objective import (
+        BraninCurrin as _BraninCurrin,
+        DTLZ2 as _DTLZ2,
+        ZDT3 as _ZDT3,
+        DTLZ7 as _DTLZ7,
+    )
+except ImportError as exc:
+    raise ImportError(
+        "activereg.benchmarkFunctions requires the optional 'benchmarks' "
+        "dependencies (botorch). Install them with: "
+        "pip install 'activereg[benchmarks]'"
+    ) from exc
 
 
 def _branin_currin_factory(dim=2, noise_std=0.0, negate=False, **_):

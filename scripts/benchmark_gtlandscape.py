@@ -29,7 +29,6 @@ import yaml
 import joblib
 import argparse
 import random
-import torch
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -194,7 +193,13 @@ if __name__ == '__main__':
     if seed is not None:
         np.random.seed(seed)
         random.seed(seed)
-        torch.manual_seed(seed)
+        # This script never evaluates botorch functions, so torch is only
+        # needed to seed it; import lazily to keep the core install torch-free.
+        try:
+            import torch
+            torch.manual_seed(seed)
+        except ImportError:
+            pass
     rng = np.random.default_rng(seed)   # seeded Generator for sampling_block weight sampling
     # --------------------------------------------------------------------------------
 

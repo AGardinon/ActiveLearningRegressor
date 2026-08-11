@@ -4,8 +4,6 @@ import json
 import shutil
 import numpy as np
 import pandas as pd
-from torch import Tensor
-from torch.utils.data import TensorDataset, DataLoader
 from scipy.spatial import cKDTree
 from pathlib import Path
 from datetime import datetime
@@ -14,17 +12,6 @@ from typing import Tuple, List, Dict, Any, Literal
 # --------------------------------------------------------------------------------
 # EXPERIMENTS
 
-
-def numpy_to_dataloader(x: np.ndarray, y: np.ndarray = None, **kwargs) -> DataLoader:
-    """
-    Example:
-    data_loader = numpy_to_dataloader(x, y, batch_size=batch_size)
-    """
-    if y is None:
-        return DataLoader(TensorDataset(Tensor(x)),  **kwargs)
-    else:
-        return DataLoader(TensorDataset(Tensor(x), Tensor(y)),  **kwargs)
-    
 
 def create_experiment_name(name_set: Tuple) -> str:
     """

@@ -1,6 +1,5 @@
 #!
 
-import torch
 import inspect
 import numpy as np
 import pandas as pd
@@ -126,6 +125,17 @@ class DatasetGenerator:
         Returns:
             np.ndarray: Computed function values of shape (n_samples,).
         """
+        # torch is only needed to evaluate the botorch test functions used to
+        # generate synthetic benchmark data; it is an optional extra.
+        try:
+            import torch
+        except ImportError as exc:
+            raise ImportError(
+                "Generating benchmark data requires the optional 'benchmarks' "
+                "dependencies (botorch, which provides torch). Install them with: "
+                "pip install 'activereg[benchmarks]'"
+            ) from exc
+
         X_tensor = torch.tensor(X, dtype=torch.float32)
         f = build_function(function, dim=self.n_dimensions, noise_std=noise_std, negate=self.negate_y, **kwargs)
         y = f(X_tensor).numpy()

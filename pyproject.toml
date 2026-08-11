@@ -16,15 +16,20 @@ dependencies = [
     "pandas",
     "scipy",
     "scikit-learn",
-    "torch",
-    "pyro-ppl",
-    "botorch",
     "matplotlib",
     "seaborn",
     "joblib",
     "pyyaml",
     "tqdm",
 ]
+
+[project.optional-dependencies]
+# Neural-network models: MLP, AnchoredEnsembleMLP, BayesianNN.
+nn = ["torch", "pyro-ppl"]
+# Synthetic test functions and benchmark dataset generation
+# (botorch depends on torch).
+benchmarks = ["botorch"]
+all = ["activereg[nn,benchmarks]"]
 
 [project.urls]
 Repository = "https://github.com/AGardinon/ActiveLearningRegressor"

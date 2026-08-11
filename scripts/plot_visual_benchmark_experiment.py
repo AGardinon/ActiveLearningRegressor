@@ -85,7 +85,7 @@ if __name__ == "__main__":
     import numpy as np
     import seaborn as sns
     from sklearn.preprocessing import StandardScaler
-    from activereg.format import BENCHMARKS_REPO, DATASETS_REPO
+    from activereg.format import BENCHMARKS_REPO, DATASETS_REPO, resolve_dataset_path
     
     chosen_repetition = args.rep
 
@@ -115,9 +115,8 @@ if __name__ == "__main__":
         if not gt_file_path.exists():
             raise FileNotFoundError(f"Ground truth file not specified in config and default file '{gt_file_name}' not found in experiment path: {EXP_PATH}")
     else:
-        gt_file_path = DATASETS_REPO / gt_file_name    
-        if not gt_file_path.exists():
-            raise FileNotFoundError(f"Ground truth file '{gt_file_name}' not found in datasets path: {DATASETS_REPO}")
+        # Accepts a gzipped variant of the configured name.
+        gt_file_path = resolve_dataset_path(gt_file_name)
     
     gt_data = pd.read_csv(gt_file_path)
 

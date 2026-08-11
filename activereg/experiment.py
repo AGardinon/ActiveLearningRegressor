@@ -5,7 +5,7 @@ import pandas as pd
 import activereg.mlmodel as regmodels
 from pathlib import Path
 from sklearn.base import BaseEstimator
-from activereg.format import DATASETS_REPO
+from activereg.format import DATASETS_REPO, resolve_dataset_path
 from activereg.hyperparams import get_gp_kernel
 from activereg.acquisition import (
     penalize_landscape_fast,
@@ -28,13 +28,12 @@ def get_gt_dataframes(ground_truth_file: str, experiment_evidence_file: str=None
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: Ground truth dataframe and evidence dataframe.
     """
-    gt_df_name = Path(ground_truth_file)
-    if gt_df_name is None:
+    if ground_truth_file is None:
         raise ValueError("Ground truth dataframe name must be provided in the config file.")
-    gt_df = pd.read_csv(DATASETS_REPO / gt_df_name)
+    gt_df = pd.read_csv(resolve_dataset_path(ground_truth_file))
 
-    exp_evidence_df_name = Path(experiment_evidence_file) if experiment_evidence_file is not None else None
-    evidence_df = pd.read_csv(DATASETS_REPO / exp_evidence_df_name) if exp_evidence_df_name is not None else None
+    evidence_df = (pd.read_csv(resolve_dataset_path(experiment_evidence_file))
+                   if experiment_evidence_file is not None else None)
 
     return gt_df, evidence_df
 

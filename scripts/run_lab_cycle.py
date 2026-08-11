@@ -33,7 +33,7 @@ import pandas as pd
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
-from activereg.format import LAB_AL_REPO, DATASETS_REPO
+from activereg.format import LAB_AL_REPO, DATASETS_REPO, resolve_dataset_path
 from activereg.utils import create_strict_folder, save_to_json
 from activereg.sampling import sample_landscape
 from activereg.experiment import (
@@ -47,11 +47,14 @@ from activereg.experiment import (
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _load_csv(path: str) -> pd.DataFrame:
-    """Load a CSV from an absolute path, relative path, or DATASETS_REPO fallback."""
+    """Load a CSV from an absolute path, relative path, or DATASETS_REPO fallback.
+
+    The DATASETS_REPO fallback also accepts a gzipped variant of the name.
+    """
     p = Path(path)
     if p.is_absolute() or p.exists():
         return pd.read_csv(p)
-    return pd.read_csv(DATASETS_REPO / path)
+    return pd.read_csv(resolve_dataset_path(path))
 
 
 def _make_scaler(scaler_type: str):

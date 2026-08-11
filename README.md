@@ -56,12 +56,13 @@ activereg/
 │   ├── _base.py            # MLModel protocol definition
 │   ├── _gpr.py             # Gaussian Process Regressor
 │   ├── _knn.py             # k-Nearest Neighbours regressor
-│   ├── _mlp.py             # MLP and Anchored Ensemble MLP
-│   ├── _bnn.py             # Bayesian Neural Network (PyTorch + Pyro)
-│   └── _kernels.py         # Kernel factory for GPs
+│   ├── _mlp.py             # MLP and Anchored Ensemble MLP        [extra: nn]
+│   ├── _bnn.py             # Bayesian Neural Network (PyTorch + Pyro)  [extra: nn]
+│   ├── _kernels.py         # Kernel factory for GPs
+│   └── _multi_property.py  # Multi-property model wrappers
 ├── acquisition.py          # Acquisition functions and batch selection
 ├── adaptiveRefinement.py   # Adaptive spatial refinement strategies
-├── benchmarkFunctions.py   # Benchmark test functions (Hartmann, Ackley, …)
+├── benchmarkFunctions.py   # Benchmark test functions (Hartmann, Ackley, …)  [extra: benchmarks]
 ├── beauty.py               # Visualization utilities
 ├── data.py                 # Dataset generation (LHS, Sobol, random)
 ├── experiment.py           # Experiment setup, model factory, and AL cycle core
@@ -87,7 +88,8 @@ All ML models expose the same three-method protocol (see `MLModel` in `activereg
 ### Requirements
 
 - Python 3.10+
-- PyTorch (CPU or GPU)
+
+The core install depends only on the scientific Python stack (NumPy, pandas, SciPy, scikit-learn, matplotlib, seaborn, joblib, PyYAML, tqdm). **PyTorch is not required** — the core covers the entire active learning loop: GPR and kNN backends, acquisition functions, batch selection, metrics, and plotting.
 
 ### Install from source
 
@@ -97,11 +99,44 @@ cd ActiveLearningRegressor
 pip install -e .
 ```
 
-This installs `activereg` in editable mode together with all required dependencies.
+### Optional extras
+
+Deep-learning and benchmark-generation dependencies are opt-in:
+
+| Extra | Installs | Needed for |
+|---|---|---|
+| `nn` | `torch`, `pyro-ppl` | `MLP`, `AnchoredEnsembleMLP`, `BayesianNN` |
+| `benchmarks` | `botorch` (pulls in `torch`) | synthetic test functions and benchmark dataset generation |
+| `all` | both of the above | everything |
+
+```bash
+pip install -e '.[nn]'           # neural-network backends
+pip install -e '.[benchmarks]'   # synthetic benchmark functions
+pip install -e '.[all]'          # everything
+```
+
+Optional components are imported lazily, so a missing extra surfaces only when you actually use it — and says which extra to install:
+
+```python
+>>> from activereg.mlmodel import BayesianNN
+ImportError: 'BayesianNN' requires the optional 'nn' dependencies.
+             Install them with: pip install 'activereg[nn]'
+```
+
+### Which extra do I need?
+
+| Task | Install |
+|---|---|
+| Run AL with GPR or kNN over an existing pool CSV | core |
+| Regenerate figures from stored benchmark results | core |
+| `scripts/run_lab_cycle.py`, `scripts/insilico_lab_al_simulation.py` | core |
+| `scripts/benchmark_gtlandscape.py` — runs against a precomputed ground-truth landscape | core |
+| `scripts/benchmark_functions.py` — generates data from analytic test functions | `benchmarks` |
+| Neural-network model backends | `nn` |
 
 ### Optional: GPU-accelerated PyTorch
 
-The default install pulls the CPU-only PyTorch wheel. For a CUDA build, install PyTorch separately **before** running `pip install -e .` — follow the [official PyTorch install guide](https://pytorch.org/get-started/locally/).
+Relevant only when installing the `nn` or `benchmarks` extras, which pull the CPU-only PyTorch wheel by default. For a CUDA build, install PyTorch separately **before** installing the extra — follow the [official PyTorch install guide](https://pytorch.org/get-started/locally/).
 
 ---
 
@@ -215,13 +250,13 @@ python scripts/insilico_lab_al_simulation.py -c scripts/insilico_lab_al_simulati
 
 ## ML Models
 
-| Model | Class | Backend | Uncertainty source |
-|---|---|---|---|
-| Gaussian Process Regressor | `GPR` | scikit-learn | Posterior variance |
-| k-Nearest Neighbours | `kNNRegressorAL` | scikit-learn | Neighbourhood spread |
-| Multi-Layer Perceptron | `MLP` | PyTorch | Dropout / ensemble |
-| Anchored Ensemble MLP | `AnchoredEnsembleMLP` | PyTorch | Ensemble disagreement |
-| Bayesian Neural Network | `BayesianNN` | PyTorch + Pyro | Variational posterior |
+| Model | Class | Backend | Uncertainty source | Requires |
+|---|---|---|---|---|
+| Gaussian Process Regressor | `GPR` | scikit-learn | Posterior variance | core |
+| k-Nearest Neighbours | `kNNRegressorAL` | scikit-learn | Neighbourhood spread | core |
+| Multi-Layer Perceptron | `MLP` | PyTorch | Dropout / ensemble | `nn` extra |
+| Anchored Ensemble MLP | `AnchoredEnsembleMLP` | PyTorch | Ensemble disagreement | `nn` extra |
+| Bayesian Neural Network | `BayesianNN` | PyTorch + Pyro | Variational posterior | `nn` extra |
 
 Models are configured via YAML files in `scripts/mlmodel_config/` and instantiated through the factory:
 
@@ -324,21 +359,35 @@ acquisition_parameters:
 
 ## Running Benchmarks
 
-Benchmark experiments compare acquisition strategies on synthetic test functions (Hartmann3, Hartmann6, Ackley, Styblinski-Tang) across dimensions.
+Benchmark experiments compare acquisition strategies on synthetic test functions (Hartmann3, Hartmann6, Ackley, Styblinski-Tang) across dimensions. Two entry points are available:
+
+**`benchmark_functions.py`** — evaluates the analytic test function directly to generate the pool and label points. Requires the `benchmarks` extra (botorch).
 
 ```bash
-# Run benchmark with synthetic functions
 bash scripts/run_benchmark_funcs.sh
 
 # Or directly with Python
 python scripts/benchmark_functions.py \
-    --benchmark_config  scripts/general_config/benchmark_config.yaml \
-    --model_config      scripts/mlmodel_config/model_config.yaml \
-    --acq_config        scripts/general_config/acquisition_mode_settings.yaml \
-    --target_config     scripts/general_config/target_function_config.yaml
+    -bc        scripts/general_config/benchmark_config.yaml \
+    -mc        scripts/mlmodel_config/gpr_config.yaml \
+    -acqmodes  scripts/general_config/acquisition_mode_settings.yaml \
+    -tfc       scripts/general_config/target_function_config.yaml \
+    -r         5
 ```
 
-Results (training CSVs, metric logs, figures) are written to `benchmarks/`.
+**`benchmark_gtlandscape.py`** — runs against a precomputed ground-truth landscape CSV named by `ground_truth_file` in the benchmark config, so no analytic function is evaluated. **Runs on the core install** (no `-tfc` argument, since the target function is already baked into the ground-truth file).
+
+```bash
+bash scripts/run_benchmark_gtlandsc.sh
+
+python scripts/benchmark_gtlandscape.py \
+    -bc        scripts/general_config/benchmark_config.yaml \
+    -mc        scripts/mlmodel_config/gpr_config.yaml \
+    -acqmodes  scripts/general_config/acquisition_mode_settings.yaml \
+    -r         5
+```
+
+Both accept `--rerun` to overwrite an existing benchmark folder. Results (training CSVs, metric logs, per-run `config/` snapshots) are written to `benchmarks/`.
 
 ---
 

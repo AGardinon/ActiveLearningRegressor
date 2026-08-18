@@ -1520,7 +1520,7 @@ def plot_weight_distribution(
 ) -> Tuple[plt.Figure, list]:
     """Weight coverage diagnostic for a joint ParEGO acquisition.
 
-    For P=2: plots the marginal KDE of w1 with optional Beta(α,α) overlay.
+    For P=2: plots the marginal KDE of w1 with optional Beta(\alpha,\alpha) overlay.
     For P>2: per-weight KDE grid.
 
     Weights are read per POINT from the ``resolved_weights`` column of
@@ -1591,7 +1591,7 @@ def plot_weight_distribution(
                 ax.plot(w1, np.full_like(w1, ax.get_ylim()[0]),
                         "|", color=color, alpha=0.3, markersize=4)
 
-            ax.set_xlabel("$\lambda_1$")
+            ax.set_xlabel(r"$\lambda_1$")
             ax.set_ylabel("density")
             ax.set_xlim(0, 1)
             ax.axvline(0.5, color="gray", linewidth=0.8, linestyle=":", alpha=0.5)

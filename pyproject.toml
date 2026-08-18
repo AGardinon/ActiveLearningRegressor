@@ -21,6 +21,7 @@ dependencies = [
     "joblib",
     "pyyaml",
     "tqdm",
+    "plotly",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +30,9 @@ nn = ["torch", "pyro-ppl"]
 # Synthetic test functions and benchmark dataset generation
 # (botorch depends on torch).
 benchmarks = ["botorch"]
-all = ["activereg[nn,benchmarks]"]
+# UMAP projections in scripts/plot_visual_benchmark_experiment.py -dim_red umap.
+viz = ["umap-learn"]
+all = ["activereg[nn,benchmarks,viz]"]
 
 [project.urls]
 Repository = "https://github.com/AGardinon/ActiveLearningRegressor"

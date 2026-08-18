@@ -4,7 +4,6 @@ import argparse
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-from umap import UMAP
 from activereg.beauty import get_axes
 
 MAIN_RESULTS_FILES = {
@@ -32,11 +31,29 @@ CSV structure: x1,x2,x3,..,y,set,refinement_step
 
 '''
 
-DIMENSIONALITY_REDUCTION_METHODS = {
-    'pca': PCA(n_components=2),
-    'tsne': TSNE(n_components=2),
-    'umap': UMAP(n_components=2),
-}
+DIMENSIONALITY_REDUCTION_METHODS = ['pca', 'tsne', 'umap']
+
+
+def get_dim_reduction(method: str):
+    """Build a 2D dimensionality reducer.
+
+    umap-learn is an optional dependency, so it is imported only when the
+    'umap' method is actually requested.
+    """
+    if method == 'pca':
+        return PCA(n_components=2)
+    if method == 'tsne':
+        return TSNE(n_components=2)
+    if method == 'umap':
+        try:
+            from umap import UMAP
+        except ImportError as exc:
+            raise ImportError(
+                "The 'umap' method requires the optional 'viz' dependencies. "
+                "Install them with: pip install 'activereg[viz]'"
+            ) from exc
+        return UMAP(n_components=2)
+    raise ValueError(f"Unknown dimensionality reduction method: {method}")
 
 # --------------------------------------------------------------
 # Functions for plotting visual benchmark results
@@ -75,7 +92,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("-exp_name", type=str, required=True, help="Experiment name to plot.")
     parser.add_argument("-exp_dim", type=str, required=True, help="Experiment dimension (e.g., 3D, 6D).")
-    parser.add_argument("-dim_red", type=str, choices=['pca', 'tsne', 'umap'], help="Dimensionality reduction method to apply.")
+    parser.add_argument("-dim_red", type=str, choices=DIMENSIONALITY_REDUCTION_METHODS, help="Dimensionality reduction method to apply.")
     parser.add_argument("-rep", type=int, required=True, help="Repetition number to plot.")
     parser.add_argument("-show_refine", action='store_true', help="Whether to include adaptive refinement points.")
     args = parser.parse_args()
@@ -150,7 +167,7 @@ if __name__ == "__main__":
     # --------------------------------------------------------------
     # Apply dimensionality reduction if specified
     if args.dim_red is not None:
-        dimred = DIMENSIONALITY_REDUCTION_METHODS[args.dim_red]
+        dimred = get_dim_reduction(args.dim_red)
         X_pool_scaled = dimred.fit_transform(X_pool_scaled)
         if args.show_refine:
             X_refinement_scaled = dimred.transform(X_refinement_scaled)

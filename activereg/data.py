@@ -45,6 +45,9 @@ class DatasetGenerator:
         self.dimension_names = dim_labels if dim_labels is not None else [f'x{i+1}' for i in range(n_dimensions)]
         self.target_label = target_label if target_label is not None else ['y']
         self.seed = seed if seed is not None else np.random.randint(0, 10000)
+        # Per-generator random stream: supplies a fresh seed to every sampling call
+        # that does not receive an explicit one (e.g. successive refinement hypercubes)
+        self.rng = np.random.default_rng(self.seed)
 
         assert len(bounds) == self.n_dimensions, "Length of bounds must match n_dimensions"
         assert all(isinstance(b, np.ndarray) and len(b) == 2 for b in bounds), "Each bound must be a tuple of (min, max)"
@@ -77,6 +80,18 @@ class DatasetGenerator:
                 f"dimension_names={self.dimension_names}), "
                 f"seed={self.seed})")
 
+    def next_seed(self) -> int:
+        """Draw a fresh integer seed from the generator's own random stream.
+
+        Successive calls return different seeds, while the whole sequence stays
+        reproducible from `self.seed`. The upper bound (2**31 - 1, max signed 32-bit
+        int) keeps the seed valid for numpy, scipy, scikit-learn and torch.
+
+        Returns:
+            int: A new seed.
+        """
+        return int(self.rng.integers(0, 2**31 - 1))
+
     def sample_space(self, n_samples: int, method: str='lhs', seed: int=None, **kwargs) -> np.ndarray:
         """Generate samples using the specified sampling method. For 'custom' method, 
         a `custom_sampler` function must be provided in kwargs. The function should
@@ -86,7 +101,8 @@ class DatasetGenerator:
         Args:
             n_samples (int): Number of samples to generate.
             method (str, optional): Sampling method to use. Defaults to 'lhs'.
-            seed (int, optional): Random seed for reproducibility. Defaults to None.
+            seed (int, optional): Random seed for reproducibility. If None, a fresh seed is
+                drawn with `next_seed()`. Defaults to None.
             **kwargs: Additional keyword arguments to pass to the sampling functions.
 
         Raises:
@@ -96,15 +112,15 @@ class DatasetGenerator:
         Returns:
             np.ndarray: Array of shape (n_samples, n_dimensions) containing the generated samples.
         """
-        if self.seed:
-            seed = self.seed
+        if seed is None:
+            seed = self.next_seed()
 
         if method == 'lhs':
             return lhs_sampling(n_samples=n_samples, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=seed)
         elif method == 'sobol':
             return sobol_sampling(n_samples=n_samples, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=seed)
         elif method == 'random':
-            return random_sampling(n_samples=n_samples, n_dimensions=self.n_dimensions, bounds=self.bounds, rounding=self.rounding, seed=seed)
+            return random_sampling(n_samples=n_samples, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=seed)
         elif method == 'custom':
             if 'custom_sampler' in kwargs:
                 custom_sampler = kwargs['custom_sampler']
@@ -147,7 +163,8 @@ class DatasetGenerator:
         n_samples: int, 
         method: str='lhs', 
         val_size: float=0.2, 
-        noise_std: float=0.0, 
+        noise_std: float=0.0,
+        seed: int=None,
         **kwargs) -> pd.DataFrame:
         """Generate a dataset by sampling the input space and computing function values.
 
@@ -157,6 +174,8 @@ class DatasetGenerator:
             method (str, optional): Sampling method to use. Defaults to 'lhs'.
             val_size (float, optional): Proportion of the dataset to include in the validation split. Defaults to 0.2.
             noise_std (float, optional): Standard deviation of the Gaussian noise to add to the output. Defaults to 0.0.
+            seed (int, optional): Seed for the train samples; the validation samples use `seed + 13`.
+                If None, `self.seed` is used. Defaults to None.
             **kwargs: Additional keyword arguments to pass to the sampling ('sampling') and function ('function') computation.
 
         Returns:
@@ -164,12 +183,13 @@ class DatasetGenerator:
         """
         kwargs_sampling = kwargs.get('sampling', {})
         kwargs_function = kwargs.get('function', {})
+        seed = self.seed if seed is None else seed
 
-        X_train = self.sample_space(n_samples, method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=self.seed, **kwargs_sampling)
+        X_train = self.sample_space(n_samples, method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=seed, **kwargs_sampling)
         y_train = self.compute_function_values(X_train, function, noise_std=noise_std, **kwargs_function)
 
         if val_size is not None and val_size > 0.0:
-            X_val = self.sample_space(int(n_samples * val_size), method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=self.seed+13, **kwargs_sampling)
+            X_val = self.sample_space(int(n_samples * val_size), method=method, n_dimensions=self.n_dimensions, bounds=self.bounds, seed=seed+13, **kwargs_sampling)
             y_val = self.compute_function_values(X_val, function, noise_std=noise_std, **kwargs_function)
 
         # Add the possibility of handling multi-target outputs in the future
@@ -291,15 +311,15 @@ def random_sampling(
     Returns:
         np.ndarray: Array of shape (n_samples, n_dimensions) containing the generated samples.
     """
-    if seed is not None:
-        np.random.seed(seed)
-
     assert len(bounds) == n_dimensions, "Length of bounds must match n_dimensions"
+
+    # Local generator: do not reseed numpy's global random state
+    rng = np.random.default_rng(seed)
 
     samples = np.zeros((n_samples, n_dimensions))
     for dim in range(n_dimensions):
         min_bound, max_bound = bounds[dim]
-        samples[:, dim] = np.random.uniform(min_bound, max_bound, n_samples)
+        samples[:, dim] = rng.uniform(min_bound, max_bound, n_samples)
         if rounding is not None:
             if isinstance(rounding, int):
                 round_val = rounding

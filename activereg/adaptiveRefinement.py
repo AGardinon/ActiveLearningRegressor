@@ -166,6 +166,9 @@ def pointwise_hypercube_refinement(
     # Generate n_points random samples within the hypercube in the original space
     refine_generator.set_bounds = hyper_cube_bounds
 
+    # Fresh seed for each hypercube, so successive refinements do not repeat the same pattern
+    call_seed = refine_generator.next_seed()
+
     # Generate the refinement dataframe containing a train and validation set
     if refine_function is not None:
         refined_df = refine_generator.generate_dataset(
@@ -174,13 +177,15 @@ def pointwise_hypercube_refinement(
             method=refine_method,
             val_size=None,
             noise_std=refine_noise_std,
+            seed=call_seed,
         )
-    
+
     if refine_function is None:
-        dimension_names = refine_generator.get_dimension_names()
+        dimension_names = refine_generator.get_dimension_names
         refine_array = refine_generator.sample_space(
             n_samples=n_points,
             method=refine_method,
+            seed=call_seed,
         )
         refined_df = pd.DataFrame(refine_array, columns=[dimension_names[i] for i in range(design_dimensions)])
 

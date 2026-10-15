@@ -1,0 +1,41 @@
+SEED: 13
+acquisition_protocol:
+  stage_1:
+    acquisition_modes:
+    - expected_improvement
+    cycles: 6
+    n_points:
+    - 2
+adaptive_refinement:
+  half_side_length_strategy: density
+  half_side_length_strategy_params:
+    base_fraction: 0.3
+    density_scale: 0.5
+    k_neighbors: 5
+    max_half_side: 0.5
+  method: lhs
+  refinement_batch_size: 250
+  refinement_centroids: 3
+  refinement_filtering_min_distance: 0.0001
+  refinement_noise_std: 0.0
+  refinement_step: 10
+batch_selection:
+  method: highest_landscape
+  method_params:
+    percentile: 95
+data_scaler: StandardScaler
+experiment_evidence: null
+experiment_name: regression_check/B
+experiment_notes: "Regression check B: Hartmann3D, init_batch_size 15 > refinement_step 10 (catch-up trigger)"
+ground_truth_file: null
+init_batch_size: 15
+init_sampling: random
+landscape_penalization: null
+n_cycles: 6
+scaler_params: null
+search_space_variables:
+- x1
+- x2
+- x3
+target_variables:
+- y

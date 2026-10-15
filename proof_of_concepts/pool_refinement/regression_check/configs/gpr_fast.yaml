@@ -1,0 +1,11 @@
+grid_search:
+  every_n_points: 20
+  perform_grid_search: false
+ml_model: GPR
+model_parameters:
+  alpha: 1e-10
+  kernel: MATERN_W
+  log_transform: false
+  n_restarts_optimizer: 2
+  normalize_y: true
+  optimizer: fmin_l_bfgs_b

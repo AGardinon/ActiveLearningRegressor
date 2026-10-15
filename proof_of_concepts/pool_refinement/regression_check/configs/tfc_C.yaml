@@ -1,0 +1,8 @@
+function_parameters:
+  function: BraninCurrin
+train_set_parameters:
+  method: lhs
+  n_samples: 1000
+  negate: true
+  noise_std: 0.0
+  val_size: null

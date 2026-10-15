@@ -1,0 +1,41 @@
+SEED: 13
+acquisition_protocol:
+  stage_1:
+    acquisition_modes:
+    - parego_joint
+    cycles: 15
+    n_points:
+    - 2
+adaptive_refinement:
+  half_side_length_strategy: density
+  half_side_length_strategy_params:
+    base_fraction: 0.3
+    density_scale: 0.5
+    k_neighbors: 5
+    max_half_side: 0.5
+  method: lhs
+  refinement_batch_size: 250
+  refinement_centroids: 3
+  refinement_filtering_min_distance: 0.0001
+  refinement_noise_std: 0.0
+  refinement_step: 10
+batch_selection:
+  method: highest_landscape
+  method_params:
+    percentile: 90
+data_scaler: StandardScaler
+experiment_evidence: null
+experiment_name: regression_check/C
+experiment_notes: "Regression check C: BraninCurrin, ParEGO (multi-property y)"
+ground_truth_file: null
+init_batch_size: 3
+init_sampling: random
+landscape_penalization: null
+n_cycles: 15
+scaler_params: null
+search_space_variables:
+- x1
+- x2
+target_variables:
+- y1
+- y2

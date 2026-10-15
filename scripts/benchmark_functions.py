@@ -36,9 +36,7 @@ from activereg.data import DatasetGenerator
 from activereg.metrics import evaluate_cycle_metrics
 from activereg.sampling import sample_landscape
 from activereg.utils import create_strict_folder
-from activereg.adaptiveRefinement import (select_centers_from_batch,
-                                          pointwise_hypercube_refinement,
-                                          filter_refined_additions)
+from activereg.adaptiveRefinement import AdaptiveRefinement
 from activereg.experiment import (get_gt_dataframes,
                                   sampling_block,
                                   setup_data_pool,
@@ -424,33 +422,26 @@ if __name__ == '__main__':
 
     # --------------------------------------------------------------------------------
     # ADAPTIVE REFINEMENT SETUP
-    # Set up the space refinement sampler, it will only refine the X_pool
-    refine_generator = None
+    # Set up the space refinement (None if disabled), it will only refine the X_pool
+    refiner = None
     refinement_config = benchmark_config.get('adaptive_refinement', None)
 
     if refinement_config is not None:
-        refine_method = refinement_config.get('method', 'lhs')
-        refine_noise_std = refinement_config.get('refinement_noise_std', 0.0)
-
         refine_generator = DatasetGenerator(
             n_dimensions=function_dim,
             bounds=function_bounds,
             negate=train_function_negate,
             seed=seed
         )
-
-        refine_step = refinement_config.get('refinement_step', 20)
-        refine_centroids = refinement_config.get('refinement_centroids', 5)
-        refine_batch_size = refinement_config.get('refinement_batch_size', 500)
-        half_side_length_strategy = refinement_config.get('half_side_length_strategy', 'density')
-        half_side_length_strategy_params = refinement_config.get('half_side_length_strategy_params', {})
-        refinement_filtering_min_distance = refinement_config.get('refinement_filtering_min_distance', 0.0001)
-
-        print(f"Adaptive refinement activated every {refine_step} points acquired, "
-              f"with {refine_centroids} centroids and adding {refine_batch_size} points per centroids.")
-        
-        # DataFrame to collect all refinement points added during the experiment (for output purposes)
-        collective_refinement_df = pd.DataFrame()
+        refiner = AdaptiveRefinement.from_config(
+            refinement_config,
+            generator=refine_generator,
+            design_bounds=function_bounds,
+            scaler=data_scaler,
+            search_var=SEARCH_VAR,
+            target_var=TARGET_VAR,
+            oracle=function_class,
+        )
     # --------------------------------------------------------------------------------
 
     # --------------------------------------------------------------------------------
@@ -473,9 +464,8 @@ if __name__ == '__main__':
         # --------------------------------------------------------------------------------
         print(f"\n--- Starting repetition {rep+1}/{N_REPS} ---\n")
         # Refinement step tracking per repetition
-        if refine_generator is not None:
-            refine_counter = 0
-            next_refine_target = refine_step
+        if refiner is not None:
+            refiner.reset()
 
         # Grid search tracking per repetition
         if perform_grid_search is True:
@@ -656,80 +646,21 @@ if __name__ == '__main__':
 
             # --------------------------------------------------------------------------------
             # Adaptive refinement of candidates pool if defined in the config file
-            # TODO: consider refactoring into a class or function for better readability and modularity
-            if refine_generator is not None:
+            refinement = refiner.step_if_due(n_points_acquired, X_train, X_pool) if refiner is not None else None
+            if refinement is not None:
+                # Append the refined and filtered points to the candidates pool
+                X_candidates = np.vstack((X_candidates, refinement.X_new))
+                y_candidates = np.concatenate((y_candidates, refinement.y_new))
 
-                if n_points_acquired >= next_refine_target:
-                    refine_counter += 1
+                # Append the refined and filtered points to the pool set
+                X_pool = np.vstack((X_pool, refinement.X_new))
+                pool_target_landscape = np.vstack((
+                    pool_target_landscape,
+                    refinement.y_new.reshape(-1, len(TARGET_VAR))
+                ))
 
-                    # From the current `sampled_indexes` select the hypercube centres
-                    X_centroids_refinement = select_centers_from_batch(
-                        candidate_points=X_train[-next_refine_target:],  # select the last acquired points as candidates for centroids selection
-                        n_centers=refine_centroids,
-                        min_centers=2
-                    )
-
-                    # Generate new candidates around each centroid
-                    refined_df = pd.DataFrame()
-                    for centroid in X_centroids_refinement:
-                        refinement_df = pointwise_hypercube_refinement(
-                            refine_generator=refine_generator,
-                            design_bounds=function_bounds,
-                            design_dimensions=function_dim,
-                            refine_centroid=np.reshape(centroid, (1, -1)),  # reshape to (1, D)
-                            pool_scaled=X_pool,
-                            half_side_length_strategy=half_side_length_strategy,
-                            hsl_strategy_params=half_side_length_strategy_params,
-                            n_points=refine_batch_size,
-                            refine_noise_std=refine_noise_std,
-                            scaler=data_scaler,
-                            refine_function=function_class,
-                            refine_method=refine_method
-                        )
-                        # CAREFUL: the refinement_df is in the original space (unscaled)
-                        refined_df = pd.concat([refined_df, refinement_df], ignore_index=True)
-
-                    # Separate refined_pool and refined_validation sets
-                    # a) Pool set
-                    X_pool_refined = refined_df[SEARCH_VAR].to_numpy()
-                    X_refined_scaled = data_scaler.transform(X_pool_refined)
-                    y_pool_refined = refined_df[TARGET_VAR].to_numpy()
-
-                    # Filter out already existing points in the candidates pool
-                    X_pool_refined_filtered, filtered_indexes = filter_refined_additions(
-                        X_addition=X_refined_scaled,
-                        X_existing=X_pool,
-                        min_distance=refinement_filtering_min_distance,
-                        filter_internal=True
-                    )
-                    y_refined_filtered = y_pool_refined[filtered_indexes]
-
-                    # Append the refined and filtered points to the candidates pool
-                    X_candidates = np.vstack((X_candidates, X_pool_refined_filtered))
-                    y_candidates = np.concatenate((y_candidates, y_refined_filtered))
-
-                    # Append the refined and filtered points to the pool set
-                    X_pool = np.vstack((X_pool, X_pool_refined_filtered))
-                    pool_target_landscape = np.vstack((
-                        pool_target_landscape,
-                        y_refined_filtered.reshape(-1, len(TARGET_VAR))
-                    ))
-
-                    # Update the next refinement target
-                    print(f"-> Adaptive refinement step {refine_counter} at {n_points_acquired} points acquired, "
-                          f"added {len(y_refined_filtered)}/{refine_centroids*refine_batch_size} points.")
-                    
-                    # Retain only the filtered points in the refined_df for output purposes
-                    refined_df = refined_df.iloc[filtered_indexes]
-
-                    # Collect all refinement points added during the experiment
-                    # Add a column to identify the refinement step
-                    refined_df['refinement_step'] = [refine_counter] * len(refined_df)
-                    collective_refinement_df = pd.concat([collective_refinement_df, refined_df], ignore_index=True)
-                    collective_refinement_save_path = BENCHMARK_PATH / f'collective_refinement_points_rep{rep+1}.csv'
-                    collective_refinement_df.to_csv(collective_refinement_save_path, index=False)
-
-                    next_refine_target += refine_step
+                # Save all the refinement points added so far in this repetition (original space)
+                refiner.log.to_csv(BENCHMARK_PATH / f'collective_refinement_points_rep{rep+1}.csv', index=False)
 
             # END of Adaptive refinement
             # --------------------------------------------------------------------------------
@@ -737,7 +668,7 @@ if __name__ == '__main__':
         print(f"\n--- End of {rep+1}/{N_REPS} ---\n")
         # End of repetition
         # Resetting the pool and candidates sets for the next repetition if the refinement took place
-        if refine_generator is not None:
+        if refiner is not None:
             # Reset the pool set; the candidates set is derived from the candidates_df so it is not affected by the refinement
             X_pool = data_scaler.transform(pool_df[SEARCH_VAR].to_numpy())
             pool_target_landscape = pool_df[TARGET_VAR].to_numpy()

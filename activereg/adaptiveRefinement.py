@@ -5,13 +5,11 @@ import pandas as pd
 from activereg.data import DatasetGenerator
 from activereg.utils import compute_knn_distance
 from scipy.spatial import cKDTree
+from dataclasses import dataclass
 from typing import Literal
 
 # --------------------------------------------------------------
 # Adaptive refinement functions
-
-# TODO: ?
-# class AdaptiveRefinement:
 
 # ---
 # Select a subset of the AL batch to serve as hypercube centers for refinement.
@@ -233,3 +231,210 @@ def filter_refined_additions(
 
     kept = np.array(kept)
     return candidates[kept], candidate_indices[kept]
+
+# --------------------------------------------------------------
+# Adaptive refinement orchestration (paper: alg:adaptive_refinement)
+
+@dataclass
+class RefinementResult:
+    """Points added to the candidate pool by one refinement step.
+
+    Attributes:
+        X_new (np.ndarray): New points in the scaled space, after filtering, shape (n, D).
+        y_new (np.ndarray | None): Oracle values at `X_new`, shape (n, P); None without an oracle.
+        step (int): Refinement step counter within the current repetition (1-based).
+        n_proposed (int): Number of points proposed before filtering.
+    """
+    X_new: np.ndarray
+    y_new: np.ndarray | None
+    step: int
+    n_proposed: int
+
+
+class AdaptiveRefinement:
+    """Adaptive hypercube refinement of the candidate pool.
+
+    Every `step` acquired points, a few centroids are selected among the latest training
+    points, a hypercube is built around each of them and filled with new points, which
+    are filtered against the existing pool and returned to the caller. The caller owns
+    the pool arrays and appends the returned points to them.
+
+    The trigger and the centroid window reproduce the original script behaviour:
+    refinement fires when `n_acquired >= next_target` (then `next_target += step`), and
+    centroids are drawn from `X_train[-next_target:]`, a window that grows with each
+    refinement.
+    """
+
+    def __init__(
+        self,
+        generator: DatasetGenerator,
+        design_bounds: np.ndarray,
+        scaler,
+        search_var: list[str],
+        target_var: list[str],
+        step: int,
+        n_centroids: int,
+        points_per_centroid: int,
+        half_side_strategy: Literal['fixed', 'density'] = 'density',
+        half_side_params: dict = None,
+        method: str = 'lhs',
+        noise_std: float = 0.0,
+        min_distance: float = 1e-4,
+        oracle=None,
+    ) -> None:
+        """Initialize the adaptive refinement.
+
+        Args:
+            generator (DatasetGenerator): Generator used to sample (and label) the hypercubes.
+            design_bounds (np.ndarray): Design space bounds in the original space, shape (D, 2).
+            scaler: Fitted scaler mapping the original space to the scaled space.
+            search_var (list[str]): Names of the search variables.
+            target_var (list[str]): Names of the target variables.
+            step (int): Number of acquired points between refinements.
+            n_centroids (int): Number of hypercube centroids per refinement.
+            points_per_centroid (int): Number of points sampled in each hypercube.
+            half_side_strategy (str, optional): 'fixed' or 'density'. Defaults to 'density'.
+            half_side_params (dict, optional): Parameters of the half-side strategy. Defaults to None.
+            method (str, optional): Sampling method within the hypercube. Defaults to 'lhs'.
+            noise_std (float, optional): Noise std added to the oracle values. Defaults to 0.0.
+            min_distance (float, optional): Minimum distance (scaled space) of new points
+                from the pool and from each other. Defaults to 1e-4.
+            oracle (optional): Function that labels the new points (benchmark mode). If None,
+                only the points are generated and `y_new` is None (no labels available).
+        """
+        self.generator = generator
+        self.design_bounds = design_bounds
+        self.scaler = scaler
+        self.search_var = search_var
+        self.target_var = target_var
+        self.step = step
+        self.n_centroids = n_centroids
+        self.points_per_centroid = points_per_centroid
+        self.half_side_strategy = half_side_strategy
+        self.half_side_params = half_side_params or {}
+        self.method = method
+        self.noise_std = noise_std
+        self.min_distance = min_distance
+        self.oracle = oracle
+        self.reset()
+
+    @classmethod
+    def from_config(
+        cls,
+        refinement_config: dict | None,
+        *,
+        generator: DatasetGenerator,
+        design_bounds: np.ndarray,
+        scaler,
+        search_var: list[str],
+        target_var: list[str],
+        oracle=None,
+    ) -> "AdaptiveRefinement | None":
+        """Build from the `adaptive_refinement` block of the benchmark config.
+
+        Keys and defaults are the same as the original scripts. Returns None when the
+        block is null (refinement disabled).
+        """
+        if refinement_config is None:
+            return None
+
+        refiner = cls(
+            generator=generator,
+            design_bounds=design_bounds,
+            scaler=scaler,
+            search_var=search_var,
+            target_var=target_var,
+            step=refinement_config.get('refinement_step', 20),
+            n_centroids=refinement_config.get('refinement_centroids', 5),
+            points_per_centroid=refinement_config.get('refinement_batch_size', 500),
+            half_side_strategy=refinement_config.get('half_side_length_strategy', 'density'),
+            half_side_params=refinement_config.get('half_side_length_strategy_params', {}),
+            method=refinement_config.get('method', 'lhs'),
+            noise_std=refinement_config.get('refinement_noise_std', 0.0),
+            min_distance=refinement_config.get('refinement_filtering_min_distance', 0.0001),
+            oracle=oracle,
+        )
+        print(f"Adaptive refinement activated every {refiner.step} points acquired, "
+              f"with {refiner.n_centroids} centroids and adding {refiner.points_per_centroid} points per centroids.")
+        return refiner
+
+    def reset(self) -> None:
+        """Reset the per-repetition state: step counter, next trigger target and log."""
+        self.counter = 0
+        self.next_target = self.step
+        self._log = pd.DataFrame()
+
+    @property
+    def log(self) -> pd.DataFrame:
+        """All points added in the current repetition (original space), with a `refinement_step` column."""
+        return self._log
+
+    def step_if_due(
+        self,
+        n_acquired: int,
+        X_train: np.ndarray,
+        X_pool: np.ndarray,
+    ) -> RefinementResult | None:
+        """Run one refinement step if the trigger is reached.
+
+        Args:
+            n_acquired (int): Number of training points acquired so far.
+            X_train (np.ndarray): Current training set (scaled space).
+            X_pool (np.ndarray): Current pool (scaled space), used for density and filtering.
+
+        Returns:
+            RefinementResult | None: The filtered new points, or None if no refinement is due.
+        """
+        if n_acquired < self.next_target:
+            return None
+
+        self.counter += 1
+        dims = self.design_bounds.shape[0]
+
+        # Select the hypercube centres among the latest training points
+        X_centroids = select_centers_from_batch(
+            candidate_points=X_train[-self.next_target:],
+            n_centers=self.n_centroids,
+            min_centers=2
+        )
+
+        # Generate new points around each centroid (original space)
+        refined_df = pd.DataFrame()
+        for centroid in X_centroids:
+            centroid_df = pointwise_hypercube_refinement(
+                refine_generator=self.generator,
+                design_bounds=self.design_bounds,
+                design_dimensions=dims,
+                refine_centroid=np.reshape(centroid, (1, -1)),
+                pool_scaled=X_pool,
+                half_side_length_strategy=self.half_side_strategy,
+                hsl_strategy_params=self.half_side_params,
+                n_points=self.points_per_centroid,
+                refine_noise_std=self.noise_std,
+                scaler=self.scaler,
+                refine_function=self.oracle,
+                refine_method=self.method
+            )
+            refined_df = pd.concat([refined_df, centroid_df], ignore_index=True)
+
+        # Filter out points too close to the pool or to each other (scaled space)
+        X_refined_scaled = self.scaler.transform(refined_df[self.search_var].to_numpy())
+        X_new, kept_indexes = filter_refined_additions(
+            X_addition=X_refined_scaled,
+            X_existing=X_pool,
+            min_distance=self.min_distance,
+            filter_internal=True
+        )
+        y_new = refined_df[self.target_var].to_numpy()[kept_indexes] if self.oracle is not None else None
+
+        n_proposed = self.n_centroids * self.points_per_centroid
+        print(f"-> Adaptive refinement step {self.counter} at {n_acquired} points acquired, "
+              f"added {len(X_new)}/{n_proposed} points.")
+
+        # Keep a log of the added points (original space)
+        refined_df = refined_df.iloc[kept_indexes].copy()
+        refined_df['refinement_step'] = self.counter
+        self._log = pd.concat([self._log, refined_df], ignore_index=True)
+
+        self.next_target += self.step
+        return RefinementResult(X_new=X_new, y_new=y_new, step=self.counter, n_proposed=n_proposed)

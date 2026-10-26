@@ -79,8 +79,8 @@ def fps(X: np.ndarray,
     fps_ndxs = np.zeros(n_points, dtype=int)
     distD = np.zeros(n_points)
 
-    # check for starting index
-    if not start_idx:
+    # check for starting index (`is None`: index 0 is a valid start)
+    if start_idx is None:
         # the b limits has to be decreaed because of python indexing
         # start from zero
         start_idx = random.randint(a=0, b=X.shape[0]-1)
@@ -102,11 +102,13 @@ def fps(X: np.ndarray,
         # takes the min from the two arrays dist1 2
         dist1 = np.minimum(dist1, dist2)
 
-        # little stopping condition
-        if np.abs(dist1).max() == 0.0:
-            print(f"Only {i} iteration possible")
-            return fps_ndxs[:i], distD[:i]
-        
+        # little stopping condition: every point is already selected (or a duplicate of one),
+        # keep the points selected so far, including the one just added
+        if np.abs(dist1).max() == 0.0 and i < n_points - 1:
+            print(f"Only {i + 1} distinct points available")
+            fps_ndxs, distD = fps_ndxs[:i + 1], distD[:i + 1]
+            break
+
     if return_distD:
         return list(fps_ndxs), distD
     else:

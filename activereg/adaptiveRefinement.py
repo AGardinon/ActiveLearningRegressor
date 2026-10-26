@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 from activereg.data import DatasetGenerator
+from activereg.sampling import fps
 from activereg.utils import compute_knn_distance
 from scipy.spatial import cKDTree
 from dataclasses import dataclass
@@ -57,6 +58,39 @@ def select_centers_from_batch(
 
     return candidate_points[selected]
 
+
+def select_centers_best_first(
+    candidate_points: np.ndarray,
+    scores: np.ndarray,
+    n_centers: int,
+    top_fraction: float = 0.2,
+) -> np.ndarray:
+    """Select hypercube centers among the best-scoring candidates, best point first.
+
+    Same structure as the `fps` batch selection: restrict to the top `top_fraction` of the
+    candidates by score (at least `n_centers` points), take the best one as the first center,
+    then add the others by greedy maximin (FPS) among the top candidates. Deterministic.
+
+    Args:
+        candidate_points (np.ndarray): Candidate points (scaled space), shape (N, D).
+        scores (np.ndarray): Score of each candidate (higher is better), shape (N,).
+        n_centers (int): Number of centers to select.
+        top_fraction (float, optional): Fraction of the candidates kept by score. Defaults to 0.2.
+
+    Returns:
+        np.ndarray: Selected centers, shape (min(n_centers, N), D), best-scoring first.
+    """
+    scores = np.asarray(scores).reshape(-1)
+    assert len(scores) == len(candidate_points), "one score per candidate point"
+    assert 0 < top_fraction <= 1, f"top_fraction must be in (0, 1], got {top_fraction}"
+
+    n_centers = min(n_centers, len(candidate_points))
+    n_top = min(len(candidate_points), max(n_centers, int(np.ceil(top_fraction * len(candidate_points)))))
+    top = np.argsort(-scores, kind='stable')[:n_top]    # best first
+
+    # FPS anchored at the best candidate (index 0 of `top`)
+    selected = fps(candidate_points[top], n_points=n_centers, start_idx=0)
+    return candidate_points[top[selected]]
 
 # ---
 # Compute half-side length for the hypercube
@@ -280,6 +314,9 @@ class AdaptiveRefinement:
     refinement (initial points included, i.e. the count starts from 0).
     Centroid window: centroids are drawn from the last `centroid_window` training points,
     or from the whole training history when `centroid_window` is None.
+    Centroid selection: 'maximin' (random first point, then greedy maximin over the window) or
+    'best_first' (best observed y first, then greedy maximin among the top
+    `centroid_top_fraction` of the window; single target property only).
     """
 
     def __init__(
@@ -293,6 +330,8 @@ class AdaptiveRefinement:
         n_centroids: int,
         points_per_centroid: int,
         centroid_window: int | None = None,
+        centroid_selection: Literal['maximin', 'best_first'] = 'maximin',
+        centroid_top_fraction: float = 0.2,
         half_side_strategy: Literal['fixed', 'density'] = 'density',
         half_side_params: dict = None,
         method: str = 'lhs',
@@ -314,6 +353,11 @@ class AdaptiveRefinement:
             centroid_window (int | None, optional): Number of latest training points from
                 which the centroids are selected. None uses the whole training history.
                 Defaults to None.
+            centroid_selection (str, optional): 'maximin' (random first point, then greedy
+                maximin) or 'best_first' (best observed y first, then greedy maximin among the
+                top `centroid_top_fraction` of the window). Defaults to 'maximin'.
+            centroid_top_fraction (float, optional): Fraction of the window kept by observed y
+                for 'best_first'. Defaults to 0.2.
             half_side_strategy (str, optional): 'fixed' or 'density'. Defaults to 'density'.
             half_side_params (dict, optional): Parameters of the half-side strategy. Defaults to None.
             method (str, optional): Sampling method within the hypercube. Defaults to 'lhs'.
@@ -334,6 +378,14 @@ class AdaptiveRefinement:
         if centroid_window is not None and centroid_window < 1:
             raise ValueError(f"centroid_window must be a positive integer or None, got {centroid_window}.")
         self.centroid_window = centroid_window
+        if centroid_selection not in ('maximin', 'best_first'):
+            raise ValueError(f"centroid_selection must be 'maximin' or 'best_first', got {centroid_selection!r}.")
+        if centroid_selection == 'best_first' and len(target_var) > 1:
+            raise NotImplementedError("centroid_selection='best_first' supports a single target property only.")
+        if not 0 < centroid_top_fraction <= 1:
+            raise ValueError(f"centroid_top_fraction must be in (0, 1], got {centroid_top_fraction}.")
+        self.centroid_selection = centroid_selection
+        self.centroid_top_fraction = centroid_top_fraction
         self.half_side_strategy = half_side_strategy
         self.half_side_params = half_side_params or {}
         self.method = method
@@ -375,6 +427,8 @@ class AdaptiveRefinement:
             n_centroids=refinement_config.get('refinement_centroids', 5),
             points_per_centroid=refinement_config.get('refinement_batch_size', 500),
             centroid_window=refinement_config.get('refinement_centroid_window', None),
+            centroid_selection=refinement_config.get('refinement_centroid_selection', 'maximin'),
+            centroid_top_fraction=refinement_config.get('refinement_centroid_top_fraction', 0.2),
             half_side_strategy=refinement_config.get('half_side_length_strategy', 'density'),
             half_side_params=refinement_config.get('half_side_length_strategy_params', {}),
             method=refinement_config.get('method', 'lhs'),
@@ -383,9 +437,12 @@ class AdaptiveRefinement:
             oracle=oracle,
         )
         window = 'whole history' if refiner.centroid_window is None else f'last {refiner.centroid_window} points'
+        selection = refiner.centroid_selection
+        if selection == 'best_first':
+            selection += f', top fraction {refiner.centroid_top_fraction}'
         print(f"Adaptive refinement activated every {refiner.step} points acquired, "
               f"with {refiner.n_centroids} centroids and adding {refiner.points_per_centroid} points per centroids "
-              f"(centroid window: {window}).")
+              f"(centroid window: {window}; centroid selection: {selection}).")
         return refiner
 
     def reset(self) -> None:
@@ -410,6 +467,7 @@ class AdaptiveRefinement:
         n_acquired: int,
         X_train: np.ndarray,
         X_pool: np.ndarray,
+        y_train: np.ndarray | None = None,
     ) -> RefinementResult | None:
         """Run one refinement step if the trigger is reached.
 
@@ -417,6 +475,8 @@ class AdaptiveRefinement:
             n_acquired (int): Number of training points acquired so far.
             X_train (np.ndarray): Current training set (scaled space).
             X_pool (np.ndarray): Current pool (scaled space), used for density and filtering.
+            y_train (np.ndarray, optional): Observed targets of `X_train`, shape (N,) or (N, 1).
+                Required for centroid_selection='best_first'. Defaults to None.
 
         Returns:
             RefinementResult | None: The filtered new points, or None if no refinement is due.
@@ -429,12 +489,24 @@ class AdaptiveRefinement:
 
         # Select the hypercube centres among the training points in the window
         X_window = X_train if self.centroid_window is None else X_train[-self.centroid_window:]
-        X_centroids = select_centers_from_batch(
-            candidate_points=X_window,
-            n_centers=self.n_centroids,
-            min_centers=2,
-            rng=self._rng,
-        )
+        if self.centroid_selection == 'best_first':
+            if y_train is None:
+                raise ValueError("centroid_selection='best_first' needs y_train.")
+            y_train = np.asarray(y_train).reshape(len(X_train), -1)[:, 0]
+            y_window = y_train if self.centroid_window is None else y_train[-self.centroid_window:]
+            X_centroids = select_centers_best_first(
+                candidate_points=X_window,
+                scores=y_window,
+                n_centers=self.n_centroids,
+                top_fraction=self.centroid_top_fraction,
+            )
+        else:
+            X_centroids = select_centers_from_batch(
+                candidate_points=X_window,
+                n_centers=self.n_centroids,
+                min_centers=2,
+                rng=self._rng,
+            )
 
         # Generate new points around each centroid (original space)
         refined_df = pd.DataFrame()

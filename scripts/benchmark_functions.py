@@ -646,7 +646,7 @@ if __name__ == '__main__':
 
             # --------------------------------------------------------------------------------
             # Adaptive refinement of candidates pool if defined in the config file
-            refinement = refiner.step_if_due(n_points_acquired, X_train, X_pool) if refiner is not None else None
+            refinement = refiner.step_if_due(n_points_acquired, X_train, X_pool, y_train=Y_train) if refiner is not None else None
             if refinement is not None:
                 # Append the refined and filtered points to the candidates pool
                 X_candidates = np.vstack((X_candidates, refinement.X_new))

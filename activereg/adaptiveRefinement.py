@@ -254,15 +254,15 @@ class RefinementResult:
 class AdaptiveRefinement:
     """Adaptive hypercube refinement of the candidate pool.
 
-    Every `step` acquired points, a few centroids are selected among the latest training
+    Every `step` acquired points, a few centroids are selected among the training
     points, a hypercube is built around each of them and filled with new points, which
     are filtered against the existing pool and returned to the caller. The caller owns
     the pool arrays and appends the returned points to them.
 
-    The trigger and the centroid window reproduce the original script behaviour:
-    refinement fires when `n_acquired >= next_target` (then `next_target += step`), and
-    centroids are drawn from `X_train[-next_target:]`, a window that grows with each
-    refinement.
+    Trigger: refinement fires when at least `step` points were acquired since the last
+    refinement (initial points included, i.e. the count starts from 0).
+    Centroid window: centroids are drawn from the last `centroid_window` training points,
+    or from the whole training history when `centroid_window` is None.
     """
 
     def __init__(
@@ -275,6 +275,7 @@ class AdaptiveRefinement:
         step: int,
         n_centroids: int,
         points_per_centroid: int,
+        centroid_window: int | None = None,
         half_side_strategy: Literal['fixed', 'density'] = 'density',
         half_side_params: dict = None,
         method: str = 'lhs',
@@ -293,6 +294,9 @@ class AdaptiveRefinement:
             step (int): Number of acquired points between refinements.
             n_centroids (int): Number of hypercube centroids per refinement.
             points_per_centroid (int): Number of points sampled in each hypercube.
+            centroid_window (int | None, optional): Number of latest training points from
+                which the centroids are selected. None uses the whole training history.
+                Defaults to None.
             half_side_strategy (str, optional): 'fixed' or 'density'. Defaults to 'density'.
             half_side_params (dict, optional): Parameters of the half-side strategy. Defaults to None.
             method (str, optional): Sampling method within the hypercube. Defaults to 'lhs'.
@@ -310,6 +314,9 @@ class AdaptiveRefinement:
         self.step = step
         self.n_centroids = n_centroids
         self.points_per_centroid = points_per_centroid
+        if centroid_window is not None and centroid_window < 1:
+            raise ValueError(f"centroid_window must be a positive integer or None, got {centroid_window}.")
+        self.centroid_window = centroid_window
         self.half_side_strategy = half_side_strategy
         self.half_side_params = half_side_params or {}
         self.method = method
@@ -347,6 +354,7 @@ class AdaptiveRefinement:
             step=refinement_config.get('refinement_step', 20),
             n_centroids=refinement_config.get('refinement_centroids', 5),
             points_per_centroid=refinement_config.get('refinement_batch_size', 500),
+            centroid_window=refinement_config.get('refinement_centroid_window', None),
             half_side_strategy=refinement_config.get('half_side_length_strategy', 'density'),
             half_side_params=refinement_config.get('half_side_length_strategy_params', {}),
             method=refinement_config.get('method', 'lhs'),
@@ -354,14 +362,16 @@ class AdaptiveRefinement:
             min_distance=refinement_config.get('refinement_filtering_min_distance', 0.0001),
             oracle=oracle,
         )
+        window = 'whole history' if refiner.centroid_window is None else f'last {refiner.centroid_window} points'
         print(f"Adaptive refinement activated every {refiner.step} points acquired, "
-              f"with {refiner.n_centroids} centroids and adding {refiner.points_per_centroid} points per centroids.")
+              f"with {refiner.n_centroids} centroids and adding {refiner.points_per_centroid} points per centroids "
+              f"(centroid window: {window}).")
         return refiner
 
     def reset(self) -> None:
-        """Reset the per-repetition state: step counter, next trigger target and log."""
+        """Reset the per-repetition state: step counter, last trigger point and log."""
         self.counter = 0
-        self.next_target = self.step
+        self.last_refined_at = 0
         self._log = pd.DataFrame()
 
     @property
@@ -385,15 +395,16 @@ class AdaptiveRefinement:
         Returns:
             RefinementResult | None: The filtered new points, or None if no refinement is due.
         """
-        if n_acquired < self.next_target:
+        if n_acquired - self.last_refined_at < self.step:
             return None
 
         self.counter += 1
         dims = self.design_bounds.shape[0]
 
-        # Select the hypercube centres among the latest training points
+        # Select the hypercube centres among the training points in the window
+        X_window = X_train if self.centroid_window is None else X_train[-self.centroid_window:]
         X_centroids = select_centers_from_batch(
-            candidate_points=X_train[-self.next_target:],
+            candidate_points=X_window,
             n_centers=self.n_centroids,
             min_centers=2
         )
@@ -436,5 +447,5 @@ class AdaptiveRefinement:
         refined_df['refinement_step'] = self.counter
         self._log = pd.concat([self._log, refined_df], ignore_index=True)
 
-        self.next_target += self.step
+        self.last_refined_at = n_acquired
         return RefinementResult(X_new=X_new, y_new=y_new, step=self.counter, n_proposed=n_proposed)

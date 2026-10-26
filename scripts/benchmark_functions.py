@@ -661,6 +661,7 @@ if __name__ == '__main__':
 
                 # Save all the refinement points added so far in this repetition (original space)
                 refiner.log.to_csv(BENCHMARK_PATH / f'collective_refinement_points_rep{rep+1}.csv', index=False)
+                refiner.cubes_log.to_csv(BENCHMARK_PATH / f'refinement_cubes_rep{rep+1}.csv', index=False)
 
             # END of Adaptive refinement
             # --------------------------------------------------------------------------------

@@ -18,6 +18,7 @@ def select_centers_from_batch(
     candidate_points: np.ndarray,
     n_centers: int = 4,
     min_centers: int = 2,
+    rng: np.random.Generator | None = None,
 ) -> np.ndarray:
     """Reduce AL batch selection to a smaller diverse set of hypercube centers.
     Assumes sampled_new_idx already has acquisition-informed diversity.
@@ -27,19 +28,24 @@ def select_centers_from_batch(
         pool_scaled (np.ndarray): Scaled pool of points from which the samples are drawn.
         n_centers (int, optional): Number of centers to select. Defaults to 4.
         min_centers (int, optional): Minimum number of centers to select. Defaults to 2.
+        rng (np.random.Generator, optional): Random generator for the first center. If None,
+            numpy's global random state is used (legacy behaviour). Defaults to None.
 
     Returns:
         np.ndarray: Indices of the selected hypercube centers.
     """
-    
+
     n_centers = max(min_centers, min(n_centers, len(candidate_points)))
-    
+
     # No reduction needed if batch is already at or below target
     if len(candidate_points) <= n_centers:
         return candidate_points
-    
-    # Otherwise greedy maximin reduction
-    selected = np.random.choice(len(candidate_points), size=1, replace=False).tolist()
+
+    # Otherwise greedy maximin reduction, starting from a random point
+    if rng is None:
+        selected = np.random.choice(len(candidate_points), size=1, replace=False).tolist()
+    else:
+        selected = [int(rng.integers(len(candidate_points)))]
     for _ in range(n_centers - 1):
         selected_points = candidate_points[selected]
         dists = np.min(
@@ -48,8 +54,9 @@ def select_centers_from_batch(
         )
         dists[selected] = -np.inf
         selected.append(np.argmax(dists))
-    
+
     return candidate_points[selected]
+
 
 # ---
 # Compute half-side length for the hypercube
@@ -116,8 +123,9 @@ def pointwise_hypercube_refinement(
     refine_function,
     half_side_length_strategy: Literal['fixed', 'density'] = 'density',
     hsl_strategy_params: dict = None,
-    refine_method: str = 'lhs'
-) -> pd.DataFrame:
+    refine_method: str = 'lhs',
+    return_cube: bool = False,
+) -> pd.DataFrame | tuple[pd.DataFrame, np.ndarray, float]:
     """Generate new candidate points within a hypercube centered at a given centroid.
 
     Args:
@@ -129,10 +137,13 @@ def pointwise_hypercube_refinement(
         scaler (_type_): Scaler used to inverse transform the hypercube bounds.
         refine_function (_type_): Function to evaluate at the generated points.
         refine_method (str, optional): Sampling method to generate points within the hypercube. Defaults to 'lhs'.
+        return_cube (bool, optional): If True, also return the hypercube bounds and half-side length. Defaults to False.
 
     Returns:
         pd.DataFrame: DataFrame containing the generated points and their evaluations.
-    """    
+            If `return_cube` is True, a tuple `(df, bounds, half_side)` with the clipped hypercube
+            bounds in the original space, shape (D, 2), and the half-side length in the scaled space.
+    """
     assert refine_centroid.shape == (1, design_dimensions), "refine_centroid must be of shape (1, n_dimensions)"
 
     # Inverse transform the centroid to the original space
@@ -187,6 +198,8 @@ def pointwise_hypercube_refinement(
         )
         refined_df = pd.DataFrame(refine_array, columns=[dimension_names[i] for i in range(design_dimensions)])
 
+    if return_cube:
+        return refined_df, hyper_cube_bounds, half_side_length
     return refined_df
 
 # ---
@@ -244,11 +257,15 @@ class RefinementResult:
         y_new (np.ndarray | None): Oracle values at `X_new`, shape (n, P); None without an oracle.
         step (int): Refinement step counter within the current repetition (1-based).
         n_proposed (int): Number of points proposed before filtering.
+        cubes (pd.DataFrame): One row per hypercube: `refinement_step`, `cube`, `half_side`
+            (scaled space), `n_proposed`, `n_added`, and per search variable `<var>_centroid`,
+            `<var>_low`, `<var>_high` (original space, bounds clipped to the design space).
     """
     X_new: np.ndarray
     y_new: np.ndarray | None
     step: int
     n_proposed: int
+    cubes: pd.DataFrame
 
 
 class AdaptiveRefinement:
@@ -323,6 +340,9 @@ class AdaptiveRefinement:
         self.noise_std = noise_std
         self.min_distance = min_distance
         self.oracle = oracle
+        # Own random generator for the centroid selection, seeded from the generator so runs are
+        # reproducible, and kept apart from numpy's global state (used e.g. by GPR restarts)
+        self._rng = np.random.default_rng(generator.next_seed())
         self.reset()
 
     @classmethod
@@ -369,15 +389,21 @@ class AdaptiveRefinement:
         return refiner
 
     def reset(self) -> None:
-        """Reset the per-repetition state: step counter, last trigger point and log."""
+        """Reset the per-repetition state: step counter, last trigger point and logs."""
         self.counter = 0
         self.last_refined_at = 0
         self._log = pd.DataFrame()
+        self._cubes_log = pd.DataFrame()
 
     @property
     def log(self) -> pd.DataFrame:
         """All points added in the current repetition (original space), with a `refinement_step` column."""
         return self._log
+
+    @property
+    def cubes_log(self) -> pd.DataFrame:
+        """All hypercubes of the current repetition, one row per cube (see `RefinementResult.cubes`)."""
+        return self._cubes_log
 
     def step_if_due(
         self,
@@ -406,13 +432,15 @@ class AdaptiveRefinement:
         X_centroids = select_centers_from_batch(
             candidate_points=X_window,
             n_centers=self.n_centroids,
-            min_centers=2
+            min_centers=2,
+            rng=self._rng,
         )
 
         # Generate new points around each centroid (original space)
         refined_df = pd.DataFrame()
-        for centroid in X_centroids:
-            centroid_df = pointwise_hypercube_refinement(
+        cube_rows, cube_sizes = [], []
+        for i_cube, centroid in enumerate(X_centroids):
+            centroid_df, cube_bounds, half_side = pointwise_hypercube_refinement(
                 refine_generator=self.generator,
                 design_bounds=self.design_bounds,
                 design_dimensions=dims,
@@ -424,9 +452,20 @@ class AdaptiveRefinement:
                 refine_noise_std=self.noise_std,
                 scaler=self.scaler,
                 refine_function=self.oracle,
-                refine_method=self.method
+                refine_method=self.method,
+                return_cube=True,
             )
             refined_df = pd.concat([refined_df, centroid_df], ignore_index=True)
+
+            # Describe the hypercube (original space, bounds clipped to the design space)
+            centroid_orig = self.scaler.inverse_transform(np.reshape(centroid, (1, -1)))[0]
+            row = {'refinement_step': self.counter, 'cube': i_cube, 'half_side': half_side,
+                   'n_proposed': len(centroid_df)}
+            for d, var in enumerate(self.search_var):
+                row[f'{var}_centroid'] = centroid_orig[d]
+                row[f'{var}_low'], row[f'{var}_high'] = cube_bounds[d]
+            cube_rows.append(row)
+            cube_sizes.append(len(centroid_df))
 
         # Filter out points too close to the pool or to each other (scaled space)
         X_refined_scaled = self.scaler.transform(refined_df[self.search_var].to_numpy())
@@ -447,5 +486,12 @@ class AdaptiveRefinement:
         refined_df['refinement_step'] = self.counter
         self._log = pd.concat([self._log, refined_df], ignore_index=True)
 
+        # Log the hypercubes, with the number of points each one kept after filtering
+        cubes_df = pd.DataFrame(cube_rows)
+        cube_of_point = np.repeat(np.arange(len(cube_sizes)), cube_sizes)
+        cubes_df['n_added'] = np.bincount(cube_of_point[kept_indexes], minlength=len(cube_sizes))
+        self._cubes_log = pd.concat([self._cubes_log, cubes_df], ignore_index=True)
+
         self.last_refined_at = n_acquired
-        return RefinementResult(X_new=X_new, y_new=y_new, step=self.counter, n_proposed=n_proposed)
+        return RefinementResult(X_new=X_new, y_new=y_new, step=self.counter, n_proposed=n_proposed,
+                                cubes=cubes_df)

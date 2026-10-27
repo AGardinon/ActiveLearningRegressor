@@ -346,11 +346,11 @@ Backwards compatibility is preserved throughout — single-property campaigns ar
 
 Once the acquisition landscape is computed, a batch of candidates is drawn using one of three strategies:
 
-| Strategy | Function | Description |
-|---|---|---|
-| Farthest Point Sampling | `fps` | Maximises pairwise distance in feature space |
-| Voronoi | `voronoi` | Cluster-aware spatial coverage |
-| Random | `rnd` | Uniform random draw from top percentile |
+| Strategy | Mode (`sampling_method` in configs) | Function | Description |
+|---|---|---|---|
+| Farthest Point Sampling | `fps` (default) | `fps` | Maximises pairwise distance in feature space |
+| Voronoi | `voronoi` | `voronoi` | Cluster-aware spatial coverage |
+| Random | `random` | `rnd` | Uniform random draw from top percentile |
 
 ```python
 from activereg.sampling import sample_landscape
@@ -368,37 +368,110 @@ Experiments are controlled by YAML configuration files under `scripts/`:
 
 ```
 scripts/
-├── general_config/
-│   ├── benchmark_config.yaml          # experiment-level settings
-│   ├── acquisition_mode_settings.yaml # acquisition function parameters
-│   └── target_function_config.yaml    # benchmark function / dataset settings
-├── mlmodel_config/
-│   ├── gpr_config.yaml                # Gaussian Process Regressor
-│   ├── knnregressor_config.yaml       # k-Nearest Neighbours
-│   └── mlpanchored_config.yaml        # Anchored Ensemble MLP  [extra: nn]
-└── lab_cycle_config_template.yaml     # template for run_lab_cycle.py
+├── general_config/                          # benchmark scripts
+│   ├── benchmark_config.yaml                # experiment, data, cycles, batch selection, protocol, refinement
+│   ├── acquisition_mode_settings.yaml       # acquisition function parameters
+│   ├── target_function_config.yaml          # test function and pool generation (benchmark_functions.py only)
+│   └── *_multiprop.yaml                     # multi-property variants of the three files above
+├── mlmodel_config/                          # benchmark scripts
+│   ├── gpr_config.yaml                      # Gaussian Process Regressor
+│   ├── knnregressor_config.yaml             # k-Nearest Neighbours
+│   └── mlpanchored_config.yaml              # Anchored Ensemble MLP  [extra: nn]
+├── lab_cycle_config_template.yaml           # run_lab_cycle.py (single file)
+└── insilico_lab_al_simulation_config.yaml   # insilico_lab_al_simulation.py (single file)
 ```
 
-Key configuration fields shared across benchmark and lab scripts:
+The benchmark and lab scripts share the same building blocks but lay out the configuration
+differently.
+
+**Benchmark scripts** split it over several files. The model file holds `ml_model` and
+`model_parameters` (plus optional `grid_search`). `acquisition_mode_settings.yaml` lists the
+modes and their parameters, and the benchmark config says how many points each mode acquires,
+stage by stage:
+
+```yaml
+# mlmodel_config/gpr_config.yaml
+ml_model: "GPR"
+model_parameters:
+  kernel: "MATERN_W"          # kernel recipe; see hyperparams.py
+  n_restarts_optimizer: 50
+  alpha: 1e-10
+  normalize_y: true
+
+# general_config/acquisition_mode_settings.yaml
+acquisition_parameters:
+  - acquisition_mode: "expected_improvement"
+  - acquisition_mode: "uncertainty_landscape"
+
+# general_config/benchmark_config.yaml
+batch_selection:
+  method: "highest_landscape"   # highest_landscape | constant_liar | kriging_believer | local_penalization
+  method_params:                # null uses the defaults
+    percentile: 95
+    sampling_method: "fps"      # fps (default) | voronoi | random
+
+acquisition_protocol:
+  stage_1:
+    cycles: 40
+    acquisition_modes: ['uncertainty_landscape', 'expected_improvement']
+    n_points: [2, 3]            # points per mode in each cycle
+
+adaptive_refinement: null       # see "Adaptive refinement" below
+```
+
+**Lab scripts** (`run_lab_cycle.py`, `insilico_lab_al_simulation.py`) use one flat file, with
+`n_points` given in each acquisition entry:
 
 ```yaml
 ml_model: "GPR"
 model_parameters:
-  kernel: "MATERN_W"          # kernel recipe; see hyperparams.py
+  kernel: "MATERN_W"
   n_restarts_optimizer: 20
   alpha: 1.0e-10
   normalize_y: true
 
-batch_selection_method: "highest_landscape"   # highest_landscape | constant_liar | …
+batch_selection_method: "highest_landscape"
 batch_selection_params:
   percentile: 95
-  sampling_method: "voronoi"  # voronoi | fps | random
+  sampling_method: "fps"        # fps (default) | voronoi | random
 
 acquisition_parameters:
   - acquisition_mode: "expected_improvement"
     n_points: 5
     xi: 0.01
 ```
+
+With `highest_landscape`, `fps` starts from the best point of the acquisition landscape and
+spreads the rest of the batch over its top percentile; with one point per mode it returns the
+argmax.
+
+### Adaptive refinement
+
+A pool-based campaign cannot do better than the best point already in its pool. Adaptive
+refinement lifts that limit: every `refinement_step` acquired points it builds a hypercube around a
+few of the acquired points (the centroids), fills it with new points, labels them with the test
+function, and adds them to the pool. It is a local search: it adds points only around acquired
+points, so a region the starting pool never touches stays out of reach.
+
+It runs only in `benchmark_functions.py`, because the new points need the function to be
+labelled. `benchmark_gtlandscape.py` stops with an error if `adaptive_refinement` is not `null`.
+It is off in the template; to enable it, replace `adaptive_refinement: null` in
+`benchmark_config.yaml` with the commented block below it. The main keys:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `refinement_step` | `20` | refine after this many points were acquired since the last refinement |
+| `refinement_centroids` | `5` | hypercubes per refinement step |
+| `refinement_batch_size` | `500` | points sampled in each hypercube |
+| `refinement_centroid_window` | `null` | pick centroids among the last N acquired points (`null` = all of them) |
+| `refinement_centroid_selection` | `maximin` | `maximin`: spread-out centroids; `best_first`: best acquired points first (single target only) |
+| `refinement_centroid_top_fraction` | `0.2` | `best_first` only: fraction of the window, ranked by target value, to pick from |
+| `half_side_length_strategy` | `density` | hypercube size: `density` (from the local pool density) or `fixed` (`base_fraction`), in scaled units |
+
+`best_first` converges faster when the starting pool covers the space (e.g. a large LHS pool);
+`maximin` is the default. Each repetition writes `collective_refinement_points_rep*.csv` (the
+points added) and `refinement_cubes_rep*.csv` (one row per hypercube) to the benchmark folder.
+Results and design notes: [`proof_of_concepts/pool_refinement/`](proof_of_concepts/pool_refinement/README.md).
 
 ---
 

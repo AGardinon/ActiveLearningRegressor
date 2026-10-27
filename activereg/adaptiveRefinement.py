@@ -6,6 +6,7 @@ from activereg.data import DatasetGenerator
 from activereg.sampling import fps
 from activereg.utils import compute_knn_distance
 from scipy.spatial import cKDTree
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from dataclasses import dataclass
 from typing import Literal
 
@@ -107,7 +108,7 @@ def get_hypercube_half_side(
     density_scale: float = 0.5,     # multiplier on mean kNN distance to determine half-side length
     # shared
     min_half_side: float = 1e-3,
-    max_half_side: float = 0.5,     # in scaled space, 0.5 = half the domain
+    max_half_side: float = 0.5,     # in scaled units (see docstring)
 ) -> float:
     """Compute the half-side length of a hypercube centered at a given centroid.
 
@@ -120,6 +121,10 @@ def get_hypercube_half_side(
         base_fraction (float, optional): Fraction of space extent to start with for the fixed strategy. Defaults to 0.1.
         density_scale (float, optional): Multiplier on mean kNN distance to determine half-side length. Defaults to 0.5.
         max_half_side (float, optional): Maximum allowed half-side length. Defaults to 0.5.
+
+    All lengths are in scaled units, so their meaning depends on the scaler: with MinMaxScaler
+    (to [0, 1]) 0.5 is half the range of each dimension; with StandardScaler it is half a standard
+    deviation, i.e. about 14% of the range for a uniformly filled dimension (sd = range / sqrt(12)).
 
     Returns:
         float: Computed half-side length of the hypercube.
@@ -141,6 +146,29 @@ def get_hypercube_half_side(
     # Clip to reasonable range
     half_side = float(np.clip(half_side, min_half_side, max_half_side))
     return half_side
+
+# ---
+# Convert a scaled-space length into per-dimension lengths in the original space
+
+def scaled_to_original_length(length: float, scaler) -> np.ndarray:
+    """Convert a length in the scaled space into per-dimension lengths in the original space.
+
+    `scale_` has opposite meanings in the two supported scalers:
+     - StandardScaler: x_scaled = (x - mean_) / scale_  ->  multiply by scale_
+     - MinMaxScaler:   x_scaled = x * scale_ + min_     ->  divide by scale_
+
+    Args:
+        length (float): Length in the scaled space.
+        scaler: Fitted StandardScaler or MinMaxScaler.
+
+    Returns:
+        np.ndarray: Length along each dimension in the original space, shape (D,).
+    """
+    if isinstance(scaler, StandardScaler):
+        return length * scaler.scale_
+    if isinstance(scaler, MinMaxScaler):
+        return length / scaler.scale_
+    raise NotImplementedError(f"Unsupported scaler for refinement: {type(scaler).__name__}")
 
 # ---
 # Create hypercube bounds and generate points within it for refinement
@@ -192,7 +220,7 @@ def pointwise_hypercube_refinement(
     )
 
     # Scale the half_side_length to each dimension based on the scaler
-    half_side_length_dimwise = half_side_length * scaler.scale_
+    half_side_length_dimwise = scaled_to_original_length(half_side_length, scaler)
 
     # Define the hypercube bounds in the original space, centered at the refine_centroid
     hyper_cube_bounds = np.zeros((design_dimensions, 2))
@@ -317,6 +345,11 @@ class AdaptiveRefinement:
     Centroid selection: 'maximin' (random first point, then greedy maximin over the window) or
     'best_first' (best observed y first, then greedy maximin among the top
     `centroid_top_fraction` of the window; single target property only).
+
+    Refinement is a local search: new points only appear around acquired points, so basins
+    the starting pool does not touch stay out of reach. 'best_first' converges faster when the
+    pool covers the space (6D Ackley, 50k pool) but stays in the basin of the best point
+    otherwise; 'maximin' is the default. See `proof_of_concepts/pool_refinement/README.md`.
     """
 
     def __init__(

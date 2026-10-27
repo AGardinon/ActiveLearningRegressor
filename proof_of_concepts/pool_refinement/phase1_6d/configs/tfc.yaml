@@ -1,0 +1,11 @@
+function_parameters:
+  bounds: null
+  custom: false
+  function: Ackley6D
+  n_dimensions: null
+train_set_parameters:
+  method: lhs
+  n_samples: 50000
+  negate: true
+  noise_std: 0.0
+  val_size: null

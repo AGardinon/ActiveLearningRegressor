@@ -1,0 +1,11 @@
+# From benchmarks/6D/GPR/ackley_gpr_40cy_5pts_1stage_3_2/config/model_config.yaml, with:
+# - `kernel_recipe` renamed to `kernel` and `use_gridsearch` dropped (keys of the current code)
+# - n_restarts_optimizer 300 -> 50 (author's decision, 2026-10-26)
+ml_model: GPR
+model_parameters:
+  alpha: 1e-10
+  kernel: MATERN_W
+  log_transform: false
+  n_restarts_optimizer: 50
+  normalize_y: true
+  optimizer: fmin_l_bfgs_b

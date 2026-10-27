@@ -1,0 +1,10 @@
+acquisition_parameters:
+- acquisition_mode: expected_improvement
+- acquisition_mode: target_expected_improvement_1
+  epsilon: 10
+  y_target: 60
+- acquisition_mode: maximum_predicted_value
+- acquisition_mode: exploration_mutual_info
+- acquisition_mode: percentage_target_expected_improvement
+  percentage: 70
+- acquisition_mode: random

@@ -1,0 +1,36 @@
+SEED: 13
+acquisition_protocol:
+  stage_1:
+    acquisition_modes:
+    - exploration_mutual_info
+    - expected_improvement
+    cycles: 40
+    n_points:
+    - 2
+    - 3
+adaptive_refinement: null
+batch_selection:
+  method: highest_landscape
+  method_params:
+    percentile: 95
+    sampling_method: voronoi
+data_scaler: StandardScaler
+experiment_evidence: null
+experiment_name: set_by_run_sh
+experiment_notes: 'Phase 1: refinement variants on the 6D Ackley paper setup (40cy,
+  5pts)'
+ground_truth_file: ackley6d_lhs_1M.csv
+init_batch_size: 5
+init_sampling: random
+landscape_penalization: null
+n_cycles: 40
+scaler_params: null
+search_space_variables:
+- x1
+- x2
+- x3
+- x4
+- x5
+- x6
+target_variables:
+- y

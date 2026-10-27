@@ -1,0 +1,46 @@
+SEED: 13
+acquisition_protocol:
+  stage_1:
+    acquisition_modes:
+    - exploration_mutual_info
+    - expected_improvement
+    cycles: 20
+    n_points:
+    - 1
+    - 1
+adaptive_refinement:
+  half_side_length_strategy: density
+  half_side_length_strategy_params:
+    base_fraction: 0.3
+    density_scale: 0.5
+    k_neighbors: 5
+    max_half_side: 0.5
+  method: lhs
+  refinement_batch_size: 25
+  refinement_centroids: 2
+  refinement_filtering_min_distance: 0.0001
+  refinement_noise_std: 0.0
+  refinement_step: 5
+  refinement_centroid_window: null
+  refinement_centroid_selection: best_first
+  refinement_centroid_top_fraction: 0.2
+batch_selection:
+  method: highest_landscape
+  method_params:
+    percentile: 95
+    sampling_method: fps
+data_scaler: StandardScaler
+experiment_evidence: null
+experiment_name: set_by_run_sh
+experiment_notes: "Phase 2: 2D Styblinski-Tang from a 5-point pool"
+ground_truth_file: null
+init_batch_size: 3
+init_sampling: random
+landscape_penalization: null
+n_cycles: 20
+scaler_params: null
+search_space_variables:
+- x1
+- x2
+target_variables:
+- y

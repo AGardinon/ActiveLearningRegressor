@@ -4,7 +4,7 @@
 
 # Function settings
 function_parameters:
-  function: "ZDT3_2obj_4D"
+  function: "DTLZ7_2obj_4D"  # "BraninCurrin", "DTLZ2_2obj_4D", "DTLZ2_2obj_6D", "ZDT3_2obj_4D", "ZDT3_2obj_6D", "DTLZ7_2obj_4D"
 
 # Train set configuration (initial pool)
 # val_size is overridden to 1.0 internally when no ground_truth_file is provided,

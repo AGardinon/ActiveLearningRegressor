@@ -4,8 +4,8 @@
 # ------------------------------------------------------------------------------
 SEED: null
 
-experiment_name: "4D/zdt3_gpr_33cy_3pt_parego_exploit_2"
-experiment_notes: "Phase 2 ParEGO reference run on ZDT3 (4D input, 2 objectives)"
+experiment_name: "4D/dtlz7_gpr_33cy_3pt_parego"
+experiment_notes: "Phase 2 ParEGO reference run on DTLZ7 (4D input, 2 objectives)"
 
 # --------------------------------------------------------------
 # Ground truth: no CSV — pool and validation are generated on the fly
@@ -48,13 +48,15 @@ batch_selection:
 acquisition_protocol:
   stage_1:
     cycles: 33
-    acquisition_modes: ['exploit_y1', 'exploit_y2', 'parego_joint']
-    n_points: [1, 1, 1]
+    acquisition_modes: ['parego_joint']
+    n_points: [3]
   # stage_2:
   #   cycles: 10
   #   acquisition_modes: ['exploit_y1', 'exploit_y2', 'parego_joint']
   #   n_points: [1, 1, 1]
 
 # --------------------------------------------------------------
-# Adaptive refinement: disabled for baseline reference run
+# Adaptive refinement configuration: disabled for the baseline reference run
+# Same block as in benchmark_config.yaml; with several targets only
+# `refinement_centroid_selection: maximin` is supported (best_first is single target only).
 adaptive_refinement: null

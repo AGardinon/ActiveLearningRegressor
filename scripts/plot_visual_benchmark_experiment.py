@@ -7,10 +7,12 @@ from sklearn.manifold import TSNE
 from activereg.beauty import get_axes
 
 MAIN_RESULTS_FILES = {
-    "config": "config.yaml",
+    "config": "config/benchmark_config.yaml",
     "metrics_file" : "benchmark_data.csv",
     "train_points_file" : "train_points_data.csv"
 }
+
+LEGACY_CONFIG_FILE = "config.yaml"     # older runs stored a single config file at the top level
 
 ADAPTIVE_REFINEMET_FORMAT = "collective_refinement_points_rep{}.csv"
 
@@ -112,14 +114,17 @@ if __name__ == "__main__":
 
     # --------------------------------------------------------------
     # Check that all main results files are present
-    for file_id, file_name in MAIN_RESULTS_FILES.items():
+    results_files = dict(MAIN_RESULTS_FILES)
+    if not (EXP_PATH / results_files["config"]).exists() and (EXP_PATH / LEGACY_CONFIG_FILE).exists():
+        results_files["config"] = LEGACY_CONFIG_FILE
+    for file_id, file_name in results_files.items():
         file_path = EXP_PATH / file_name
         if not file_path.exists():
             raise FileNotFoundError(f"Required file '{file_name}' not found in experiment path: {EXP_PATH}")
     
     # --------------------------------------------------------------
     # Load config file
-    with open(EXP_PATH / MAIN_RESULTS_FILES["config"], 'r') as f:
+    with open(EXP_PATH / results_files["config"], 'r') as f:
         config = yaml.safe_load(f)
 
     # --------------------------------------------------------------
@@ -140,7 +145,9 @@ if __name__ == "__main__":
     # Get X_pool and y_pool from GT data
     search_variables_names = config.get("search_space_variables", [])
     target_variable_name = config.get("target_variables", None)
-    gt_data = gt_data[gt_data['set'] == 'train']
+    # older GT files carry a 'set' column (train/validation); current ones hold the pool only
+    if 'set' in gt_data.columns:
+        gt_data = gt_data[gt_data['set'] == 'train']
     X_pool = gt_data[search_variables_names].to_numpy()
     y_pool = gt_data[target_variable_name].to_numpy().ravel()
 
@@ -157,7 +164,9 @@ if __name__ == "__main__":
             raise FileNotFoundError(f"Adaptive refinement file '{adaptive_refinement_file_name}' not found in experiment path: {EXP_PATH}")
         adaptive_refinement_data = pd.read_csv(adaptive_refinement_file_path)
 
-        adaptive_refinement_data = adaptive_refinement_data[adaptive_refinement_data['set'] == 'train']
+        # older refinement files carry a 'set' column (train/validation); current ones hold train points only
+        if 'set' in adaptive_refinement_data.columns:
+            adaptive_refinement_data = adaptive_refinement_data[adaptive_refinement_data['set'] == 'train']
         X_refinement = adaptive_refinement_data[search_variables_names].to_numpy()
         y_refinement = adaptive_refinement_data[target_variable_name].to_numpy().ravel()
         refinement_steps = adaptive_refinement_data['refinement_step'].to_numpy().ravel()

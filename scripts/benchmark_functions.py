@@ -302,7 +302,10 @@ if __name__ == '__main__':
         if function_class is None:
             raise ValueError(f"Custom function '{function_name}' is not defined in FUNCTION_CLASSES. Please define it or check the function name.")
         else:
-            function_params = function_config
+            function_params = dict(function_config)
+            # YAML gives the bounds as nested lists; DatasetGenerator expects an array
+            if function_params.get('bounds') is not None:
+                function_params['bounds'] = np.asarray(function_params['bounds'], dtype=float)
             print(f"Selected custom benchmark function: {function_name} with parameters: {function_params}")
 
     else:

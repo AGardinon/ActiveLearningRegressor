@@ -29,7 +29,10 @@ def highest_landscape_selection(
     """
     threshold = np.percentile(landscape, percentile)
     indices = np.where(landscape >= threshold)[0]
-    
+
+    # A small candidate set (e.g. a sparse pool) cannot supply more than its size
+    min_points = min(min_points, len(landscape))
+
     # Adjust if too few/many points
     if len(indices) < min_points:
         # Lower threshold to get more points
